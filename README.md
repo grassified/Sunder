@@ -30,8 +30,9 @@ The name says it all: to *sunder* means to split apart. We split the music from 
 - **Seamless Seeking**: Mutes the audio stream during seek operations to eliminate pops and glitches, providing a smooth navigation experience
 - **Smart error recovery** if a track fails (geo-blocked, age-gated, unavailable), a banner appears offering to find an alternative version automatically, with auto-skip fallback if ignored
 - **Retry with bypass** yt-dlp failures trigger a silent retry with `--force-ipv4` and `--geo-bypass` before giving up
-- **Non-Blocking Preparation**: Implements session-based audio preparation, allowing you to skip tracks rapidly without blocking the audio thread or getting stuck in a "Preparing" state
-- **Prefetching** silently pre-downloads upcoming tracks for seamless transitions
+- **Non-Blocking Preparation**: Session-based audio preparation, allowing you to skip tracks rapidly without blocking the audio thread or getting stuck in a "Preparing" state
+- **Prefetching**: Silently pre-downloads upcoming tracks for seamless transitions
+- **Media Key Support**: Fully integrated with system media controls (MPRIS on Linux). Control playback using your keyboard's hardware multimedia keys (Play/Pause, Next, Previous)
 
 ### Queue
 - **Three-section view**: Now Playing card, Next Up (with drag-to-reorder), Previously Played
@@ -48,6 +49,7 @@ The name says it all: to *sunder* means to split apart. We split the music from 
 - **Explore** with personalized recommendations built from your listening history
 - **Synced & Dynamic Lyrics**: Fetches synced lyrics from multiple high-quality sources (LRCLIB, Lyrics.ovh, etc.). If no synced lyrics are available, it automatically falls back to YouTube transcripts for maximum reliability
 - **User Configuration**: Highly customizable settings via a persistent configuration system. Adjust seek steps, volume increments, subtitle languages, and more to fit your workflow
+- **Visual Notifications**: Native system notifications on track changes, featuring the song title, artist name, and a high-quality cropped thumbnail for an polished, integrated experience
 - **Warm animated UI** with spring physics, staggered entrances, glow pulses, and micro-interactions
 - **~15MB binary** with release optimizations (LTO, strip, single codegen unit)
 - **Zero telemetry**. Nothing leaves your machine except YouTube search queries

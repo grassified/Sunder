@@ -16,6 +16,7 @@ use extraction::Extractor;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -59,6 +60,13 @@ pub fn run() {
             ipc::commands::get_config,
             ipc::commands::set_config,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::ScaleFactorChanged { .. } = event {
+                // Force a layout recalculation or simply trigger a tiny resize to "wake up" the renderer
+                let size = window.outer_size().unwrap_or_default();
+                let _ = window.set_size(size);
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to run Sunder");
 }

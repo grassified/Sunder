@@ -7,6 +7,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use rodio::{Decoder, OutputStream, Sink, Source};
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig,
+};
 use tauri::Emitter;
 
 use super::equalizer::{EqSettings, EqSource};
@@ -30,6 +33,8 @@ pub enum AudioCommand {
     SetVolume(f32),
     /// Seek to a time in seconds.
     Seek(f64),
+    /// Update media metadata for system controls.
+    UpdateMetadata { title: String, artist: String, thumbnail: Option<String> },
 }
 
 pub struct AudioHandle {
@@ -40,6 +45,7 @@ pub struct AudioHandle {
     pub volume: Arc<RwLock<f32>>,
     pub eq_settings: Arc<RwLock<EqSettings>>,
     pub current_session: Arc<AtomicU64>,
+    app: tauri::AppHandle,
 }
 
 impl AudioHandle {
@@ -60,6 +66,7 @@ impl AudioHandle {
             volume: volume.clone(),
             eq_settings: eq_settings.clone(),
             current_session: current_session.clone(),
+            app: app.clone(),
         };
 
         std::thread::Builder::new()
@@ -77,6 +84,10 @@ impl AudioHandle {
             self.current_session.fetch_add(1, Ordering::SeqCst);
         }
         let _ = self.tx.send(cmd);
+    }
+
+    pub fn app_handle(&self) -> &tauri::AppHandle {
+        &self.app
     }
 }
 
@@ -104,9 +115,34 @@ fn audio_thread(
             return;
         }
     };
-    eprintln!("[sunder] audio thread started, output device ready");
-
     let mut sink: Option<Sink> = None;
+
+    let mut controls = MediaControls::new(PlatformConfig {
+        dbus_name: "sunder",
+        display_name: "Sunder",
+        hwnd: None,
+    }).ok();
+
+    if let Some(ref mut c) = controls {
+        let app_handle = app.clone();
+        let _ = c.attach(move |event| {
+            match event {
+                MediaControlEvent::Play | MediaControlEvent::Pause | MediaControlEvent::Toggle => {
+                    let _ = app_handle.emit("media-toggle", ());
+                }
+                MediaControlEvent::Next => {
+                    let _ = app_handle.emit("media-next", ());
+                }
+                MediaControlEvent::Previous => {
+                    let _ = app_handle.emit("media-previous", ());
+                }
+                MediaControlEvent::Stop => {
+                    let _ = app_handle.emit("media-stop", ());
+                }
+                _ => {}
+            }
+        });
+    }
 
     loop {
         let first = rx.recv_timeout(Duration::from_millis(50));
@@ -169,6 +205,9 @@ fn audio_thread(
                         position_ms.store(0, Ordering::Release);
                         sink = Some(new_sink);
                         *state.write().unwrap() = PlaybackState::Playing;
+                        if let Some(ref mut c) = controls {
+                            let _ = c.set_playback(MediaPlayback::Playing { progress: None });
+                        }
                         emit_state(&app, &state, &position_ms, &duration_ms);
                     }
                 }
@@ -184,12 +223,18 @@ fn audio_thread(
                     if let Some(ref s) = sink {
                         s.pause();
                         *state.write().unwrap() = PlaybackState::Paused;
+                        if let Some(ref mut c) = controls {
+                            let _ = c.set_playback(MediaPlayback::Paused { progress: None });
+                        }
                     }
                 }
                 AudioCommand::Resume => {
                     if let Some(ref s) = sink {
                         s.play();
                         *state.write().unwrap() = PlaybackState::Playing;
+                        if let Some(ref mut c) = controls {
+                            let _ = c.set_playback(MediaPlayback::Playing { progress: None });
+                        }
                     }
                 }
                 AudioCommand::Stop => {
@@ -198,6 +243,9 @@ fn audio_thread(
                     }
                     *state.write().unwrap() = PlaybackState::Stopped;
                     position_ms.store(0, Ordering::Release);
+                    if let Some(ref mut c) = controls {
+                        let _ = c.set_playback(MediaPlayback::Stopped);
+                    }
                 }
                 AudioCommand::SetVolume(v) => {
                     *volume.write().unwrap() = v;
@@ -218,6 +266,17 @@ fn audio_thread(
                             std::thread::sleep(Duration::from_millis(50));
                             s.set_volume(vol);
                         }
+                    }
+                }
+                AudioCommand::UpdateMetadata { title, artist, thumbnail } => {
+                    if let Some(ref mut c) = controls {
+                        let _ = c.set_metadata(MediaMetadata {
+                            title: Some(&title),
+                            artist: Some(&artist),
+                            album: None,
+                            cover_url: thumbnail.as_deref(),
+                            duration: Some(std::time::Duration::from_millis(duration_ms.load(std::sync::atomic::Ordering::Relaxed))),
+                        });
                     }
                 }
             }

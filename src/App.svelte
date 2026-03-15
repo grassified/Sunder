@@ -1,5 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
+  import { 
+    isPermissionGranted, 
+    requestPermission, 
+  } from "@tauri-apps/plugin-notification";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import SearchBar from "./lib/components/SearchBar.svelte";
   import TrackList from "./lib/components/TrackList.svelte";
@@ -18,7 +23,8 @@
     seek, 
     setVolume, 
     playNext, 
-    playPrev 
+    playPrev,
+    stop
   } from "./lib/ipc/bridge";
 
   let cleanup: (() => void) | undefined;
@@ -75,7 +81,28 @@
   onMount(() => {
     cleanup = initProgressListener();
     config.load();
-    return () => cleanup?.();
+
+    // Request notification permissions
+    isPermissionGranted().then(granted => {
+      if (!granted) {
+        requestPermission();
+      }
+    });
+
+    const unlistens = [
+      listen("media-toggle", () => {
+        if (player.isPlaying) pause();
+        else resume();
+      }),
+      listen("media-next", () => playNext()),
+      listen("media-previous", () => playPrev()),
+      listen("media-stop", () => stop()),
+    ];
+
+    return () => {
+      cleanup?.();
+      Promise.all(unlistens).then(funs => funs.forEach(f => f()));
+    };
   });
 </script>
 
@@ -110,8 +137,8 @@
   .app-shell {
     display: flex;
     flex-direction: row;
-    height: 100vh;
-    width: 100vw;
+    height: 100%;
+    width: 100%;
     background: var(--bg-base);
     overflow: hidden;
   }
@@ -121,7 +148,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
   }
 

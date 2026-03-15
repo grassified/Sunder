@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
 use tauri::State;
+use tauri_plugin_notification::NotificationExt;
 
 use crate::audio::AudioHandle;
 use crate::audio::engine::AudioCommand;
@@ -63,20 +64,81 @@ pub async fn play_track(
     db: State<'_, SearchCache>,
     extractor: State<'_, Extractor>,
 ) -> Result<(), String> {
-    // Look up duration from DB by primary key (instant).
-    // Only fall back to yt-dlp metadata if the track was never seen before.
-    let duration_ms = match db.get_track_by_id(&track_id) {
-        Ok(Some(t)) => (t.duration_secs * 1000.0) as u64,
-        _ => {
-            match extractor.metadata(&track_id).await {
-                Ok(t) => {
-                    let _ = db.upsert_tracks(&[t.clone()]);
-                    (t.duration_secs * 1000.0) as u64
-                }
-                Err(_) => 0,
+    let track_info = db.get_track_by_id(&track_id).ok().flatten();
+    
+    let duration_ms = if let Some(ref t) = track_info {
+        (t.duration_secs * 1000.0) as u64
+    } else {
+        match extractor.metadata(&track_id).await {
+            Ok(t) => {
+                let _ = db.upsert_tracks(&[t.clone()]);
+                (t.duration_secs * 1000.0) as u64
             }
+            Err(_) => 0,
         }
     };
+
+    if let Some(t) = track_info {
+        audio.send(AudioCommand::UpdateMetadata {
+            title: t.title.clone(),
+            artist: t.artist.clone(),
+            thumbnail: Some(t.thumbnail.clone()),
+        });
+
+        // Trigger system notification with thumbnail
+        let app = audio.app_handle().clone();
+        let title = t.title.clone();
+        let artist = t.artist.clone();
+        let thumb_url = t.thumbnail.clone();
+        let tid = track_id.clone();
+
+        tauri::async_runtime::spawn(async move {
+            let thumb_orig = std::env::temp_dir().join(format!("{}_thumb_orig.jpg", tid));
+            let thumb_square = std::env::temp_dir().join(format!("{}_thumb.jpg", tid));
+            
+            // Download thumbnail if it doesn't exist
+            if !thumb_square.exists() {
+                let _ = tokio::process::Command::new("curl")
+                    .args(["-L", "-s", "-o", thumb_orig.to_str().unwrap_or_default(), &thumb_url])
+                    .status()
+                    .await;
+
+                if thumb_orig.exists() {
+                    // Crop to square using ffmpeg (detect shortest side)
+                    let _ = tokio::process::Command::new("ffmpeg")
+                        .args([
+                            "-i", thumb_orig.to_str().unwrap_or_else(|| ""),
+                            "-vf", "crop=ih:ih", // This assumes landscape, which most YT thumbs are. Better: min(iw,ih)
+                            "-y",
+                            thumb_square.to_str().unwrap_or_else(|| "")
+                        ])
+                        .status()
+                        .await;
+                    
+                    // Specific crop for YouTube 16:9 to square:
+                    // "crop=ih:ih" works well for thumbnails because they are wider than they are tall.
+                    let _ = tokio::process::Command::new("ffmpeg")
+                        .args([
+                            "-i", thumb_orig.to_str().unwrap_or_default(),
+                            "-vf", "crop=min(iw\\,ih):min(iw\\,ih)",
+                            "-y", thumb_square.to_str().unwrap_or_default()
+                        ])
+                        .status()
+                        .await;
+                }
+            }
+
+            let mut builder = app.notification().builder()
+                .title(title)
+                .body(artist);
+            
+            if thumb_square.exists() {
+                builder = builder.large_icon(thumb_square.to_str().unwrap_or_default());
+            }
+
+            let _ = builder.show();
+        });
+    }
 
     audio.send(AudioCommand::Play { video_id: track_id.clone(), duration_ms });
     let _ = db.record_listen(&track_id);
