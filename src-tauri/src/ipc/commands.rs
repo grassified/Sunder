@@ -20,12 +20,13 @@ pub async fn search(
     db: State<'_, SearchCache>,
     extractor: State<'_, Extractor>,
 ) -> Result<SearchResult, String> {
+    let limit = config.get().search_limit;
     let local = db.search_local(&query).map_err(|e| e.to_string())?;
-    if !local.is_empty() {
+    
+    // Only return local results if we have enough to satisfy the limit
+    if !local.is_empty() && local.len() >= limit {
         return Ok(SearchResult { tracks: local, source: SearchSource::Local });
     }
-
-    let limit = config.get().search_limit;
 
     // Search both YT Music and YouTube, merge results
     let (music, youtube) = tokio::join!(

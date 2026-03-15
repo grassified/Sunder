@@ -167,8 +167,10 @@ function cleanForSearch(artist: string, title: string) {
   const cleanArtist = artist
     .replace(/ - Topic$/, "")
     .replace(/VEVO$/i, "")
+    .replace(/\s*Official$/i, "")
     .trim();
-  const cleanTitle = title
+
+  let cleanTitle = title
     .replace(/\s*\(Official\s*(Music\s*)?Video\)/i, "")
     .replace(/\s*\[Official\s*(Music\s*)?Video\]/i, "")
     .replace(/\s*\(Lyrics?\)/i, "")
@@ -179,8 +181,37 @@ function cleanForSearch(artist: string, title: string) {
     .replace(/\s*\[ft\..*?\]/i, "")
     .replace(/\s*\(feat\..*?\)/i, "")
     .replace(/\s*\[feat\..*?\]/i, "")
+    .replace(/\s*\(Prod\.\s*.*?\)/i, "")
+    .replace(/\s*\[Prod\.\s*.*?\]/i, "")
+    .replace(/\s*1080p/gi, "")
+    .replace(/\s*4k/gi, "")
+    .replace(/\s*x264/gi, "")
+    .replace(/\s*HD/gi, "")
     .trim();
+  
+  // If artist is in title like "Artist - Title", split it
+  if (cleanTitle.includes(" - ")) {
+    const parts = cleanTitle.split(" - ");
+    if (parts[0].toLowerCase().includes(cleanArtist.toLowerCase()) || cleanArtist.toLowerCase().includes(parts[0].toLowerCase())) {
+        cleanTitle = parts.slice(1).join(" - ").trim();
+    }
+  }
+
   return { cleanArtist, cleanTitle };
+}
+
+function validateLyrics(currentArtist: string, currentTitle: string, resultArtist: string, resultTitle: string): boolean {
+  const cA = currentArtist.toLowerCase();
+  const cT = currentTitle.toLowerCase();
+  const rA = resultArtist.toLowerCase();
+  const rT = resultTitle.toLowerCase();
+
+  // Basic check: Result title must contain a major part of current title or vice versa
+  // And artist should match significantly
+  const titleMatch = rT.includes(cT) || cT.includes(rT);
+  const artistMatch = rA.includes(cA) || cA.includes(rA);
+
+  return titleMatch && artistMatch;
 }
 
 async function tryLrclib(artist: string, title: string, durationSecs?: number): Promise<boolean> {
@@ -202,9 +233,10 @@ async function tryLrclib(artist: string, title: string, durationSecs?: number): 
     const results = await res.json();
     if (!Array.isArray(results) || results.length === 0) return false;
 
-    // Prefer results with synced lyrics
-    const withSynced = results.find((r: any) => r.syncedLyrics);
-    const best = withSynced || results[0];
+    const withSynced = results.find((r: any) => r.syncedLyrics && validateLyrics(artist, title, r.artistName, r.trackName));
+    const best = withSynced || results.find((r: any) => validateLyrics(artist, title, r.artistName, r.trackName));
+
+    if (!best) return false;
 
     if (best.syncedLyrics) {
       const { parseLrc } = await import("../state/lyrics.svelte.ts");
@@ -237,8 +269,10 @@ async function tryLrclibQuery(query: string): Promise<boolean> {
     const results = await res.json();
     if (!Array.isArray(results) || results.length === 0) return false;
 
-    const withSynced = results.find((r: any) => r.syncedLyrics);
-    const best = withSynced || results[0];
+    const withSynced = results.find((r: any) => r.syncedLyrics && (query.toLowerCase().includes(r.trackName.toLowerCase()) || r.trackName.toLowerCase().includes(query.toLowerCase())));
+    const best = withSynced || results.find((r: any) => query.toLowerCase().includes(r.trackName.toLowerCase()) || r.trackName.toLowerCase().includes(query.toLowerCase()));
+
+    if (!best) return false;
 
     if (best.syncedLyrics) {
       const { parseLrc } = await import("../state/lyrics.svelte.ts");
@@ -310,7 +344,8 @@ export async function fetchLyrics(artist: string, title: string, trackId: string
 
     // 8. YouTube subtitles/captions (last resort, via backend)
     try {
-      const subs = await invoke<string>("get_subtitles", { videoId: trackId });
+      const lang = config.current.subtitle_lang || "en";
+      const subs = await invoke<string>("get_subtitles", { videoId: trackId, lang });
       if (subs && subs.trim().length > 20) {
         lyricsState.content = subs;
         lyricsState.source = "YouTube";
