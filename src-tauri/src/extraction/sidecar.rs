@@ -25,16 +25,19 @@ impl Extractor {
                 "--ignore-errors",
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .output()
             .await
             .map_err(|e| AppError::Extraction(format!("failed to run yt-dlp: {e}")))?;
 
         if !output.status.success() {
-            return Err(AppError::Extraction("yt-dlp search failed".into()));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("yt-dlp failed with status {}. stderr: {}", output.status, stderr);
+            return Err(AppError::Extraction(format!("yt-dlp search failed: {}", stderr)));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
+        eprintln!("yt-dlp stdout (first 200 chars): {}", &stdout.chars().take(200).collect::<String>());
         let tracks: Vec<Track> = stdout
             .lines()
             .filter_map(|line| {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { search, searchLocal } from "../ipc/bridge";
   import { searchState } from "../state/search.svelte";
+  import { toastState } from "../state/toast.svelte";
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -28,6 +29,7 @@
       searchState.results = res.tracks;
     } catch (e) {
       console.error("search failed:", e);
+      toastState.add(`Search failed: ${e}`, "error", 8000);
     } finally {
       searchState.searching = false;
     }

@@ -13,6 +13,7 @@
   } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { nav } from "../state/nav.svelte";
+  import { toastState } from "../state/toast.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import WormText from "./WormText.svelte";
   import type { Playlist, Track } from "../types";
@@ -48,8 +49,10 @@
       await createPlaylist(name);
       newName = "";
       await refreshPlaylists();
+      toastState.add("Playlist created", "info", 2000);
     } catch (e) {
       console.error("create playlist:", e);
+      toastState.add(`Failed to create playlist: ${e}`, "error");
     } finally {
       creating = false;
     }
@@ -63,8 +66,10 @@
         nav.activePlaylistId = null;
       }
       await refreshPlaylists();
+      toastState.add("Playlist deleted", "info", 2000);
     } catch (e) {
       console.error("delete playlist:", e);
+      toastState.add(`Failed to delete playlist: ${e}`, "error");
     }
   }
 

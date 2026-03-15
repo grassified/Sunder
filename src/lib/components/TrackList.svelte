@@ -2,6 +2,7 @@
   import { playTrack } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { searchState } from "../state/search.svelte";
+  import { toastState } from "../state/toast.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import WormText from "./WormText.svelte";
   import type { Track } from "../types";
@@ -21,6 +22,7 @@
       await playTrack(track);
     } catch (e) {
       console.error("play failed:", e);
+      toastState.add(`Failed to play track: ${e}`, "error");
     }
   }
 

@@ -3,6 +3,7 @@
   import { getExplore, playTrack } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { exploreCache } from "../state/explore.svelte";
+  import { toastState } from "../state/toast.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import WormText from "./WormText.svelte";
   import type { Track } from "../types";
@@ -21,6 +22,7 @@
       exploreCache.fetchedAt = Date.now();
     } catch (e) {
       console.error("explore failed:", e);
+      toastState.add(`Failed to load explore: ${e}`, "error");
     } finally {
       exploreCache.loading = false;
     }
@@ -38,6 +40,7 @@
       await playTrack(track);
     } catch (e) {
       console.error("play failed:", e);
+      toastState.add(`Failed to play track: ${e}`, "error");
     }
   }
 

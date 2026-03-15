@@ -21,7 +21,10 @@ pub async fn search(
         return Ok(SearchResult { tracks: local, source: SearchSource::Local });
     }
 
-    let tracks = extractor.search(&query, 10).await.map_err(|e| e.to_string())?;
+    let tracks = extractor.search(&query, 10).await.map_err(|e| {
+        eprintln!("Extractor error: {}", e.to_string());
+        e.to_string()
+    })?;
     let _ = db.upsert_tracks(&tracks);
 
     Ok(SearchResult { tracks, source: SearchSource::Remote })

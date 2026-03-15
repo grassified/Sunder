@@ -2,6 +2,7 @@
   import { listPlaylists, addToPlaylist, removeFromPlaylist, playlistsContainingTrack } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { nav } from "../state/nav.svelte";
+  import { toastState } from "../state/toast.svelte";
   import type { Playlist, Track } from "../types";
 
   let { onRemoveFromPlaylist = undefined }: { onRemoveFromPlaylist?: (trackId: string) => void } = $props();
@@ -12,7 +13,6 @@
   let track = $state<Track | null>(null);
   let playlists = $state<Playlist[]>([]);
   let showPlaylists = $state(false);
-  let toast = $state("");
   let trackPlaylistIds = $state<Set<number>>(new Set());
 
   let inQueue = $derived(track !== null && player.queue.some((t) => t.id === track!.id));
@@ -67,8 +67,8 @@
     try {
       await addToPlaylist(playlistId, track.id);
       showToast("Added to playlist");
-    } catch (_) {
-      showToast("Failed to add");
+    } catch (e) {
+      showToast(`Failed to add: ${e}`, "error");
     }
     close();
   }
@@ -88,15 +88,14 @@
       await removeFromPlaylist(nav.activePlaylistId, removedId);
       onRemoveFromPlaylist?.(removedId);
       showToast("Removed from playlist");
-    } catch (_) {
-      showToast("Failed to remove");
+    } catch (e) {
+      showToast(`Failed to remove: ${e}`, "error");
     }
     close();
   }
 
-  function showToast(msg: string) {
-    toast = msg;
-    setTimeout(() => { toast = ""; }, 2000);
+  function showToast(msg: string, type: "info" | "error" = "info") {
+    toastState.add(msg, type, 2000);
   }
 </script>
 
@@ -158,10 +157,6 @@
       {/if}
     {/if}
   </div>
-{/if}
-
-{#if toast}
-  <div class="toast">{toast}</div>
 {/if}
 
 <style>
@@ -244,21 +239,5 @@
     padding: 8px 10px;
     font-size: 0.8rem;
     color: var(--text-muted);
-  }
-
-  .toast {
-    position: fixed;
-    bottom: 100px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-elevated);
-    border: 1px solid var(--bg-overlay);
-    color: var(--text-primary);
-    padding: 8px 16px;
-    border-radius: var(--radius);
-    font-size: 0.85rem;
-    z-index: 250;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    animation: toastSlide 300ms var(--ease-spring);
   }
 </style>
