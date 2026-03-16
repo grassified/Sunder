@@ -36,6 +36,7 @@ pub fn run() {
             ipc::commands::set_volume,
             ipc::commands::seek,
             ipc::commands::get_playback_state,
+            ipc::commands::get_track,
             ipc::commands::create_playlist,
             ipc::commands::list_playlists,
             ipc::commands::delete_playlist,

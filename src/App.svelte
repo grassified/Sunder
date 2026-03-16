@@ -8,13 +8,31 @@
   import QueueView from "./lib/components/QueueView.svelte";
   import Player from "./lib/components/Player.svelte";
   import Toast from "./lib/components/Toast.svelte";
-  import { initProgressListener } from "./lib/ipc/bridge";
+  import { initProgressListener, getPlaybackState, getTrack } from "./lib/ipc/bridge";
   import { nav } from "./lib/state/nav.svelte";
+  import { player } from "./lib/state/player.svelte";
 
   let cleanup: (() => void) | undefined;
 
   onMount(() => {
     cleanup = initProgressListener();
+    
+    // Restore player state from backend on page reload
+    getPlaybackState().then(async (state) => {
+      if (state.current_track_id) {
+        const track = await getTrack(state.current_track_id);
+        if (track) {
+          player.currentTrack = track;
+        }
+      }
+      player.volume = state.volume;
+      player.currentTime = state.position_ms / 1000;
+      player.duration = state.duration_ms / 1000;
+      player.playbackState = state.state;
+      player.isPlaying = state.state === "playing";
+      player.isBuffering = state.state === "loading" || state.state === "buffering";
+    }).catch(console.error);
+
     return () => cleanup?.();
   });
 </script>

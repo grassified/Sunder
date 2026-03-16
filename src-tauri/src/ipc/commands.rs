@@ -93,12 +93,14 @@ pub async fn get_playback_state(audio: State<'_, AudioHandle>) -> Result<serde_j
     let pos = audio.position_ms.load(Ordering::Relaxed);
     let dur = audio.duration_ms.load(Ordering::Relaxed);
     let vol = *audio.volume.read().unwrap();
+    let current_track_id = audio.current_track_id.read().unwrap().clone();
 
     Ok(serde_json::json!({
         "state": state.to_string(),
         "position_ms": pos,
         "duration_ms": dur,
         "volume": vol,
+        "current_track_id": current_track_id,
     }))
 }
 
@@ -133,6 +135,11 @@ pub async fn get_eq_settings(audio: State<'_, AudioHandle>) -> Result<serde_json
 #[tauri::command]
 pub async fn search_local(query: String, db: State<'_, SearchCache>) -> Result<Vec<Track>, String> {
     db.search_local(&query).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_track(id: String, db: State<'_, SearchCache>) -> Result<Option<Track>, String> {
+    db.get_track_by_id(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

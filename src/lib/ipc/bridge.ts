@@ -11,6 +11,14 @@ export async function searchLocal(query: string): Promise<Track[]> {
   return invoke<Track[]>("search_local", { query });
 }
 
+export async function getTrack(id: string): Promise<Track | null> {
+  return invoke<Track | null>("get_track", { id });
+}
+
+export async function getPlaybackState(): Promise<any> {
+    return invoke<any>("get_playback_state");
+}
+
 export async function playTrack(track: Track): Promise<void> {
   player.currentTrack = track;
   player.isBuffering = true;

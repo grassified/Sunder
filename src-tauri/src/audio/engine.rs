@@ -26,6 +26,7 @@ pub struct AudioHandle {
     pub duration_ms: Arc<AtomicU64>,
     pub volume: Arc<RwLock<f32>>,
     pub eq_settings: Arc<RwLock<EqSettings>>,
+    pub current_track_id: Arc<RwLock<Option<String>>>,
 }
 
 impl AudioHandle {
@@ -36,6 +37,7 @@ impl AudioHandle {
         let duration_ms = Arc::new(AtomicU64::new(0));
         let volume = Arc::new(RwLock::new(0.8_f32));
         let eq_settings = Arc::new(RwLock::new(EqSettings::default()));
+        let current_track_id = Arc::new(RwLock::new(None));
 
         let handle = Self {
             tx,
@@ -44,12 +46,13 @@ impl AudioHandle {
             duration_ms: duration_ms.clone(),
             volume: volume.clone(),
             eq_settings: eq_settings.clone(),
+            current_track_id: current_track_id.clone(),
         };
 
         std::thread::Builder::new()
             .name("sunder-audio".into())
             .spawn(move || {
-                audio_thread(rx, state, position_ms, duration_ms, volume, eq_settings, app);
+                audio_thread(rx, state, position_ms, duration_ms, volume, eq_settings, current_track_id, app);
             })
             .expect("failed to spawn audio thread");
 
@@ -72,6 +75,7 @@ fn audio_thread(
     duration_ms: Arc<AtomicU64>,
     volume: Arc<RwLock<f32>>,
     eq_settings: Arc<RwLock<EqSettings>>,
+    current_track_id: Arc<RwLock<Option<String>>>,
     app: tauri::AppHandle,
 ) {
     let (_stream, stream_handle) = match OutputStream::try_default() {
@@ -108,6 +112,7 @@ fn audio_thread(
                     }
 
                     *state.write().unwrap() = PlaybackState::Loading;
+                    *current_track_id.write().unwrap() = Some(video_id.clone());
                     duration_ms.store(dur, Ordering::Release);
                     position_ms.store(0, Ordering::Release);
                     emit_state(&app, &state, &position_ms, &duration_ms);
@@ -149,6 +154,7 @@ fn audio_thread(
                         s.stop();
                     }
                     *state.write().unwrap() = PlaybackState::Stopped;
+                    *current_track_id.write().unwrap() = None;
                     position_ms.store(0, Ordering::Release);
                 }
                 AudioCommand::SetVolume(v) => {
@@ -198,6 +204,7 @@ fn audio_thread(
                 s.stop();
             }
             *state.write().unwrap() = PlaybackState::Idle;
+            *current_track_id.write().unwrap() = None;
             position_ms.store(0, Ordering::Release);
             let _ = app.emit("track-finished", ());
         }
