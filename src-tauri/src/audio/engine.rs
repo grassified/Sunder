@@ -1,6 +1,6 @@
 use std::io::{self, BufRead, Read};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -12,6 +12,8 @@ use super::state::PlaybackState;
 
 pub enum AudioCommand {
     Play { video_id: String, duration_ms: u64 },
+    Prepared { session_id: usize, sink: rodio::Sink, duration_ms: u64 },
+    LoadFailed { session_id: usize, error: String },
     Pause,
     Resume,
     Stop,
@@ -26,6 +28,7 @@ pub struct AudioHandle {
     pub duration_ms: Arc<AtomicU64>,
     pub volume: Arc<RwLock<f32>>,
     pub eq_settings: Arc<RwLock<EqSettings>>,
+    pub current_session: Arc<AtomicUsize>,
 }
 
 impl AudioHandle {
@@ -36,20 +39,26 @@ impl AudioHandle {
         let duration_ms = Arc::new(AtomicU64::new(0));
         let volume = Arc::new(RwLock::new(0.8_f32));
         let eq_settings = Arc::new(RwLock::new(EqSettings::default()));
+        let current_session = Arc::new(AtomicUsize::new(0));
 
         let handle = Self {
-            tx,
+            tx: tx.clone(),
             state: state.clone(),
             position_ms: position_ms.clone(),
             duration_ms: duration_ms.clone(),
             volume: volume.clone(),
             eq_settings: eq_settings.clone(),
+            current_session: current_session.clone(),
         };
+
+        let app_handle = app.clone();
+        let current_session_clone = current_session.clone();
+        let tx_clone = tx.clone();
 
         std::thread::Builder::new()
             .name("sunder-audio".into())
             .spawn(move || {
-                audio_thread(rx, state, position_ms, duration_ms, volume, eq_settings, app);
+                audio_thread(rx, state, position_ms, duration_ms, volume, eq_settings, app_handle, current_session_clone, tx_clone);
             })
             .expect("failed to spawn audio thread");
 
@@ -73,6 +82,8 @@ fn audio_thread(
     volume: Arc<RwLock<f32>>,
     eq_settings: Arc<RwLock<EqSettings>>,
     app: tauri::AppHandle,
+    current_session: Arc<AtomicUsize>,
+    tx: std::sync::mpsc::Sender<AudioCommand>,
 ) {
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
@@ -103,33 +114,58 @@ fn audio_thread(
         for cmd in cmds {
             match cmd {
                 AudioCommand::Play { video_id, duration_ms: dur } => {
-                    if let Some(s) = sink.take() {
-                        s.stop();
-                    }
-
+                    let session_id = current_session.fetch_add(1, Ordering::SeqCst) + 1;
                     *state.write().unwrap() = PlaybackState::Loading;
                     duration_ms.store(dur, Ordering::Release);
                     position_ms.store(0, Ordering::Release);
                     emit_state(&app, &state, &position_ms, &duration_ms);
 
-                    eprintln!("[sunder] starting playback for: {video_id}");
-                    let vol = *volume.read().unwrap();
+                    let app_clone = app.clone();
+                    let state_clone = state.clone();
+                    let stream_handle_clone = stream_handle.clone();
+                    let volume_clone = volume.clone();
+                    let eq_settings_clone = eq_settings.clone();
+                    let tx_clone = tx.clone();
+                    let video_id_clone = video_id.clone();
 
-                    let t0 = std::time::Instant::now();
-                    match start_streaming(&video_id, &state, &stream_handle, vol, &eq_settings, &app) {
-                        Ok(new_sink) => {
-                            eprintln!("[sunder] playback started ({:.1?})", t0.elapsed());
-                            sink = Some(new_sink);
-                            *state.write().unwrap() = PlaybackState::Playing;
+                    std::thread::spawn(move || {
+                        let vol = *volume_clone.read().unwrap();
+                        match start_streaming(&video_id_clone, &state_clone, &stream_handle_clone, vol, &eq_settings_clone, &app_clone) {
+                            Ok(new_sink) => {
+                                let _ = tx_clone.send(AudioCommand::Prepared {
+                                    session_id,
+                                    sink: new_sink,
+                                    duration_ms: dur,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = tx_clone.send(AudioCommand::LoadFailed {
+                                    session_id,
+                                    error: e.to_string(),
+                                });
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("[sunder] playback error: {e}");
-                            let _ = app.emit("playback-error", serde_json::json!({
-                                "video_id": video_id,
-                                "error": e.to_string(),
-                            }));
-                            *state.write().unwrap() = PlaybackState::Idle;
+                    });
+                }
+                AudioCommand::Prepared { session_id, sink: new_sink, duration_ms: dur } => {
+                    if session_id == current_session.load(Ordering::SeqCst) {
+                        if let Some(s) = sink.take() {
+                            s.stop();
                         }
+                        duration_ms.store(dur, Ordering::Release);
+                        position_ms.store(0, Ordering::Release);
+                        sink = Some(new_sink);
+                        *state.write().unwrap() = PlaybackState::Playing;
+                        emit_state(&app, &state, &position_ms, &duration_ms);
+                    }
+                }
+                AudioCommand::LoadFailed { session_id, error } => {
+                    if session_id == current_session.load(Ordering::SeqCst) {
+                        *state.write().unwrap() = PlaybackState::Idle;
+                        emit_state(&app, &state, &position_ms, &duration_ms);
+                        let _ = app.emit("playback-error", serde_json::json!({
+                            "error": error,
+                        }));
                     }
                 }
                 AudioCommand::Pause => {
