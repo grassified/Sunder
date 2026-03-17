@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::io::{self, BufRead, Read};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,6 +8,11 @@ use std::time::Duration;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use tauri::Emitter;
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
+
+/// Wrapper to send a raw HWND pointer across threads.
+/// SAFETY: The HWND outlives the audio thread (it's the main window).
+struct RawHwnd(*mut c_void);
+unsafe impl Send for RawHwnd {}
 
 use super::equalizer::{EqSettings, EqSource};
 use super::state::PlaybackState;
@@ -48,11 +54,15 @@ impl AudioHandle {
             eq_settings: eq_settings.clone(),
         };
 
+        // Extract the HWND on the main thread (where it's safe) for Windows media key support.
+        // On non-Windows platforms this is unused.
+        let hwnd = Self::extract_hwnd(&app);
+
         let tx_clone = tx.clone();
         std::thread::Builder::new()
             .name("sunder-audio".into())
             .spawn(move || {
-                audio_thread(tx_clone, rx, state, position_ms, duration_ms, volume, eq_settings, app);
+                audio_thread(tx_clone, rx, state, position_ms, duration_ms, volume, eq_settings, app, hwnd);
             })
             .expect("failed to spawn audio thread");
 
@@ -61,6 +71,23 @@ impl AudioHandle {
 
     pub fn send(&self, cmd: AudioCommand) {
         let _ = self.tx.send(cmd);
+    }
+
+    /// Extract the main window's HWND for souvlaki on Windows.
+    /// Returns None on Linux/macOS where HWND is not needed.
+    fn extract_hwnd(app: &tauri::AppHandle) -> Option<RawHwnd> {
+        #[cfg(target_os = "windows")]
+        {
+            use tauri::Manager;
+            app.get_webview_window("main")
+                .and_then(|w| w.hwnd().ok())
+                .map(|h| RawHwnd(h.0 as *mut c_void))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = app;
+            None
+        }
     }
 }
 
@@ -77,6 +104,7 @@ fn audio_thread(
     volume: Arc<RwLock<f32>>,
     eq_settings: Arc<RwLock<EqSettings>>,
     app: tauri::AppHandle,
+    hwnd: Option<RawHwnd>,
 ) {
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
@@ -92,19 +120,27 @@ fn audio_thread(
     let mut controls = match MediaControls::new(PlatformConfig {
         dbus_name: "sunder",
         display_name: "Sunder",
-        hwnd: None,
+        hwnd: hwnd.map(|h| h.0),
     }) {
         Ok(mut c) => {
             let tx_clone = tx.clone();
+            let app_clone = app.clone();
             let _ = c.attach(move |event| {
                 match event {
                     MediaControlEvent::Pause => { let _ = tx_clone.send(AudioCommand::Pause); }
                     MediaControlEvent::Play => { let _ = tx_clone.send(AudioCommand::Resume); }
-                    MediaControlEvent::Toggle => { /* Not implemented */ }
-                    MediaControlEvent::Next => { /* Next handled by frontend usually, but could be integrated */ }
-                    MediaControlEvent::Previous => { /* Previous handled by frontend */ }
+                    MediaControlEvent::Toggle => {
+                        // Toggle routes through the frontend so it can update UI state
+                        let _ = app_clone.emit("media-toggle", ());
+                    }
+                    MediaControlEvent::Next => {
+                        let _ = app_clone.emit("media-next", ());
+                    }
+                    MediaControlEvent::Previous => {
+                        let _ = app_clone.emit("media-previous", ());
+                    }
                     MediaControlEvent::Stop => { let _ = tx_clone.send(AudioCommand::Stop); }
-                    MediaControlEvent::Seek(_) => {} // Not used
+                    MediaControlEvent::Seek(_) => {}
                     MediaControlEvent::SeekBy(_, _) => {}
                     MediaControlEvent::SetPosition(pos) => { let _ = tx_clone.send(AudioCommand::Seek(pos.0.as_secs_f64())); }
                     MediaControlEvent::SetVolume(v) => { let _ = tx_clone.send(AudioCommand::SetVolume(v as f32)); }
@@ -115,6 +151,9 @@ fn audio_thread(
         }
         Err(_) => None,
     };
+
+    let mut last_mpris_state: Option<PlaybackState> = None;
+    let mut last_mpris_pos: u64 = 0;
 
     loop {
         let first = rx.recv_timeout(Duration::from_millis(50));
@@ -215,27 +254,36 @@ fn audio_thread(
             }
         }
 
+        // Only update MPRIS when playback state or position actually changed
         if let Some(ref mut c) = controls {
-            let st = state.read().unwrap();
+            let st = state.read().unwrap().clone();
             let pos = position_ms.load(Ordering::Relaxed);
             let dur = duration_ms.load(Ordering::Relaxed);
-            let progress = if dur > 0 {
-                Some(souvlaki::MediaPosition(Duration::from_millis(pos)))
-            } else {
-                None
-            };
+            let state_changed = last_mpris_state.as_ref() != Some(&st);
+            let pos_changed = pos.abs_diff(last_mpris_pos) > 500; // debounce to 500ms
 
-            match *st {
-                PlaybackState::Playing => {
-                    let _ = c.set_playback(MediaPlayback::Playing { progress });
+            if state_changed || pos_changed {
+                let progress = if dur > 0 {
+                    Some(souvlaki::MediaPosition(Duration::from_millis(pos)))
+                } else {
+                    None
+                };
+
+                match st {
+                    PlaybackState::Playing => {
+                        let _ = c.set_playback(MediaPlayback::Playing { progress });
+                    }
+                    PlaybackState::Paused => {
+                        let _ = c.set_playback(MediaPlayback::Paused { progress });
+                    }
+                    PlaybackState::Stopped | PlaybackState::Idle => {
+                        let _ = c.set_playback(MediaPlayback::Stopped);
+                    }
+                    _ => {}
                 }
-                PlaybackState::Paused => {
-                    let _ = c.set_playback(MediaPlayback::Paused { progress });
-                }
-                PlaybackState::Stopped | PlaybackState::Idle => {
-                    let _ = c.set_playback(MediaPlayback::Stopped);
-                }
-                _ => {}
+
+                last_mpris_state = Some(st);
+                last_mpris_pos = pos;
             }
         }
 
