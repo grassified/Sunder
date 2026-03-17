@@ -22,6 +22,7 @@
 
   let cleanup: (() => void) | undefined;
 
+  // TODO: read from persistent config once PR #10 (settings) is merged
   const seekStep = 5;
   const volStep = 0.05;
 
