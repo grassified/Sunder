@@ -12,6 +12,7 @@
     "moduleDetection": "force",
     "strict": true,
     "noEmit": true,
+    "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
   "include": ["src/**/*.ts", "src/**/*.svelte"]
