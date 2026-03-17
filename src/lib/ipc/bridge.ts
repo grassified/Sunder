@@ -11,6 +11,10 @@ export async function searchLocal(query: string): Promise<Track[]> {
   return invoke<Track[]>("search_local", { query });
 }
 
+export async function importYtPlaylist(url: string, playlistName: string): Promise<Playlist> {
+  return invoke<Playlist>("import_yt_playlist", { url, playlistName });
+}
+
 export async function playTrack(track: Track): Promise<void> {
   player.currentTrack = track;
   player.isBuffering = true;
@@ -32,7 +36,7 @@ export async function playTrack(track: Track): Promise<void> {
 
 let advancing = false;
 
-async function playNextInQueue(): Promise<void> {
+export async function playNext(): Promise<void> {
   if (advancing) return;
   advancing = true;
   try {
@@ -42,6 +46,13 @@ async function playNextInQueue(): Promise<void> {
     }
   } finally {
     advancing = false;
+  }
+}
+
+export async function playPrev(): Promise<void> {
+  const prev = player.prevTrack();
+  if (prev) {
+    await playTrack(prev);
   }
 }
 
@@ -143,7 +154,7 @@ export function initProgressListener(): () => void {
   }).then((fn) => { unlistenDownload = fn; });
 
   listen("track-finished", () => {
-    playNextInQueue();
+    playNext();
   }).then((fn) => { unlistenFinished = fn; });
 
   listen<{ video_id: string; error: string }>("playback-error", (event) => {
@@ -157,7 +168,7 @@ export function initProgressListener(): () => void {
     if (player.consecutiveErrors < 3 && player.hasNext) {
       setTimeout(() => {
         if (player.currentTrack?.id === failedId && !player.findingAlt) {
-          playNextInQueue();
+          playNext();
         }
       }, 4000);
     }
