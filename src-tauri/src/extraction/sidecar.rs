@@ -124,7 +124,9 @@ impl Extractor {
         let _ = std::fs::remove_file(&vtt_path);
 
         // Parse VTT: extract text lines, skip timestamps and metadata
-        let re_tags = regex_lite::Regex::new(r"<[^>]+>").unwrap();
+        use std::sync::LazyLock;
+        static RE_TAGS: LazyLock<regex_lite::Regex> =
+            LazyLock::new(|| regex_lite::Regex::new(r"<[^>]+>").unwrap());
         let lyrics = content
             .lines()
             .filter(|l| {
@@ -137,7 +139,7 @@ impl Extractor {
                     && !l.contains(" --> ")
                     && l.parse::<u32>().is_err()
             })
-            .map(|l| re_tags.replace_all(l, "").to_string())
+            .map(|l| RE_TAGS.replace_all(l, "").to_string())
             .collect::<Vec<_>>()
             .join("\n");
 

@@ -29,7 +29,10 @@ export async function playTrack(track: Track): Promise<void> {
   }
   player.prefetchAhead(player.queueIndex);
   await invoke("play_track", { trackId: track.id });
-  fetchLyrics(track.id, track.artist, track.title, track.duration_secs);
+  // Lazy lyrics: only fetch if the lyrics panel is already open
+  if (lyricsState.visible) {
+    fetchLyrics(track.id, track.artist, track.title, track.duration_secs);
+  }
 }
 
 let advancing = false;
