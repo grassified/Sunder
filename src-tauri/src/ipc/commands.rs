@@ -220,7 +220,7 @@ pub async fn import_yt_playlist(
     db: State<'_, SearchCache>,
     extractor: State<'_, Extractor>,
 ) -> Result<Playlist, String> {
-    let (extracted_name, playlist_thumbnail, tracks) = extractor
+    let (extracted_name, _playlist_thumbnail, tracks) = extractor
         .extract_playlist(&url)
         .await
         .map_err(|e| e.to_string())?;
@@ -236,9 +236,6 @@ pub async fn import_yt_playlist(
     };
 
     let playlist = db.create_playlist(&name).map_err(|e| e.to_string())?;
-    
-    // If we have a playlist thumbnail, we could update the playlist metadata here
-    // But for now let's just add the tracks
     let _ = db.upsert_tracks(&tracks);
     for track in tracks {
         let _ = db.add_to_playlist(playlist.id, &track.id);

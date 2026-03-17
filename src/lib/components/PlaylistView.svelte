@@ -60,21 +60,31 @@
   }
 
   let importing = $state(false);
+  let showImportForm = $state(false);
+  let importUrl = $state("");
+  let importName = $state("");
+
   async function handleImport() {
-    const url = prompt("Enter YouTube / YouTube Music playlist URL:");
-    if (!url) return;
-    const name = prompt("Enter a name for this playlist (optional):") || "Imported Playlist";
+    if (!importUrl.trim()) return;
     importing = true;
     try {
-      const p = await importYtPlaylist(url, name);
+      const p = await importYtPlaylist(importUrl.trim(), importName.trim() || "Imported Playlist");
       await refreshPlaylists();
       toastState.add(`Imported "${p.name}" (${p.track_count} tracks)`, "info");
+      importUrl = "";
+      importName = "";
+      showImportForm = false;
     } catch (e) {
       console.error("import:", e);
       toastState.add(`Failed to import: ${e}`, "error");
     } finally {
       importing = false;
     }
+  }
+
+  function handleImportKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") handleImport();
+    if (e.key === "Escape") { showImportForm = false; importUrl = ""; importName = ""; }
   }
 
   async function handleDelete(id: number) {
@@ -139,22 +149,18 @@
 
   async function handlePlayAll() {
     if (detailTracks.length === 0) return;
-    
-    // Non-blocking: navigate first
-    nav.activeTab = "queue";
-    
-    // Small delay to ensure transition starts
-    setTimeout(async () => {
-      player.setQueue(detailTracks);
-      await playTrack(detailTracks[0]);
-    }, 10);
+    player.clearQueue();
+    for (const t of detailTracks) player.addToQueue(t);
+    const first = player.playFromQueue(0);
+    if (first) await playTrack(first);
   }
 
   async function handleQuickPlay(p: Playlist) {
     try {
       const tracks = await getPlaylistTracks(p.id);
       if (tracks.length === 0) return;
-      player.setQueue(tracks);
+      player.clearQueue();
+      for (const t of tracks) player.addToQueue(t);
       const first = player.playFromQueue(0);
       if (first) await playTrack(first);
     } catch (e) {
@@ -320,10 +326,30 @@
       <button class="create-btn" onclick={handleCreate} disabled={creating || !newName.trim()}>
         {creating ? "..." : "+ Create"}
       </button>
-      <button class="import-link-btn" onclick={handleImport} disabled={importing}>
-        {importing ? "..." : "Import Playlists"}
+      <button class="import-link-btn" onclick={() => showImportForm = !showImportForm}>
+        {showImportForm ? "Cancel" : "Import Playlist"}
       </button>
     </div>
+
+    {#if showImportForm}
+      <div class="import-form">
+        <input
+          type="text"
+          placeholder="YouTube / YT Music playlist URL..."
+          bind:value={importUrl}
+          onkeydown={handleImportKeydown}
+        />
+        <input
+          type="text"
+          placeholder="Playlist name (optional)"
+          bind:value={importName}
+          onkeydown={handleImportKeydown}
+        />
+        <button class="create-btn" onclick={handleImport} disabled={importing || !importUrl.trim()}>
+          {importing ? "Importing..." : "Import"}
+        </button>
+      </div>
+    {/if}
 
     {#if playlists.length === 0}
       <div class="empty-state">
@@ -336,15 +362,11 @@
           <div class="playlist-row">
             <button class="playlist-btn" onclick={(e) => { if (renamingId === p.id) e.preventDefault(); else openPlaylist(p); }}>
               <div class="playlist-icon">
-                {#if p.thumbnail}
-                  <img src={p.thumbnail} alt={p.name} class="playlist-thumb" />
-                {:else}
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M9 18V5l12-2v13" />
                     <circle cx="6" cy="18" r="3" />
                     <circle cx="18" cy="16" r="3" />
                   </svg>
-                {/if}
               </div>
               <div class="playlist-info">
                 {#if renamingId === p.id}
@@ -448,6 +470,28 @@
 
   .import-link-btn:disabled { opacity: 0.5; cursor: default; }
 
+  .import-form {
+    display: flex;
+    gap: 8px;
+    padding: 0 24px;
+    margin-bottom: 12px;
+  }
+
+  .import-form input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--bg-overlay);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+  }
+
+  .import-form input:focus {
+    border-color: var(--accent-dim);
+    outline: none;
+  }
+
   .empty-state {
     display: flex;
     flex-direction: column;
@@ -508,14 +552,7 @@
     border-radius: var(--radius-sm);
     color: var(--accent);
     flex-shrink: 0;
-    overflow: hidden;
     transition: background 200ms ease, transform 200ms ease;
-  }
-
-  .playlist-thumb {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .playlist-btn:hover .playlist-icon {
