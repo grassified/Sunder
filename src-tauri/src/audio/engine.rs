@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use rodio::{Decoder, OutputStream, Sink, Source};
 use tauri::Emitter;
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
 
 use super::equalizer::{EqSettings, EqSource};
 use super::state::PlaybackState;
@@ -17,6 +18,7 @@ pub enum AudioCommand {
     Stop,
     SetVolume(f32),
     Seek(f64),
+    UpdateMetadata { title: String, artist: String, thumbnail: Option<Vec<u8>> },
 }
 
 pub struct AudioHandle {
@@ -38,7 +40,7 @@ impl AudioHandle {
         let eq_settings = Arc::new(RwLock::new(EqSettings::default()));
 
         let handle = Self {
-            tx,
+            tx: tx.clone(),
             state: state.clone(),
             position_ms: position_ms.clone(),
             duration_ms: duration_ms.clone(),
@@ -46,10 +48,11 @@ impl AudioHandle {
             eq_settings: eq_settings.clone(),
         };
 
+        let tx_clone = tx.clone();
         std::thread::Builder::new()
             .name("sunder-audio".into())
             .spawn(move || {
-                audio_thread(rx, state, position_ms, duration_ms, volume, eq_settings, app);
+                audio_thread(tx_clone, rx, state, position_ms, duration_ms, volume, eq_settings, app);
             })
             .expect("failed to spawn audio thread");
 
@@ -66,6 +69,7 @@ fn ytdlp_bin() -> String {
 }
 
 fn audio_thread(
+    tx: std::sync::mpsc::Sender<AudioCommand>,
     rx: std::sync::mpsc::Receiver<AudioCommand>,
     state: Arc<RwLock<PlaybackState>>,
     position_ms: Arc<AtomicU64>,
@@ -84,6 +88,33 @@ fn audio_thread(
     eprintln!("[sunder] audio thread started, output device ready");
 
     let mut sink: Option<Sink> = None;
+
+    let mut controls = match MediaControls::new(PlatformConfig {
+        dbus_name: "sunder",
+        display_name: "Sunder",
+        hwnd: None,
+    }) {
+        Ok(mut c) => {
+            let tx_clone = tx.clone();
+            let _ = c.attach(move |event| {
+                match event {
+                    MediaControlEvent::Pause => { let _ = tx_clone.send(AudioCommand::Pause); }
+                    MediaControlEvent::Play => { let _ = tx_clone.send(AudioCommand::Resume); }
+                    MediaControlEvent::Toggle => { /* Not implemented */ }
+                    MediaControlEvent::Next => { /* Next handled by frontend usually, but could be integrated */ }
+                    MediaControlEvent::Previous => { /* Previous handled by frontend */ }
+                    MediaControlEvent::Stop => { let _ = tx_clone.send(AudioCommand::Stop); }
+                    MediaControlEvent::Seek(_) => {} // Not used
+                    MediaControlEvent::SeekBy(_, _) => {}
+                    MediaControlEvent::SetPosition(pos) => { let _ = tx_clone.send(AudioCommand::Seek(pos.0.as_secs_f64())); }
+                    MediaControlEvent::SetVolume(v) => { let _ = tx_clone.send(AudioCommand::SetVolume(v as f32)); }
+                    _ => {}
+                }
+            });
+            Some(c)
+        }
+        Err(_) => None,
+    };
 
     loop {
         let first = rx.recv_timeout(Duration::from_millis(50));
@@ -156,6 +187,9 @@ fn audio_thread(
                     if let Some(ref s) = sink {
                         s.set_volume(v);
                     }
+                    if let Some(ref mut c) = controls {
+                        let _ = c.set_volume(v as f64);
+                    }
                 }
                 AudioCommand::Seek(secs) => {
                     if let Some(ref s) = sink {
@@ -167,6 +201,41 @@ fn audio_thread(
                         }
                     }
                 }
+                AudioCommand::UpdateMetadata { title, artist, thumbnail: _ } => {
+                    if let Some(ref mut c) = controls {
+                        let _ = c.set_metadata(MediaMetadata {
+                            title: Some(&title),
+                            artist: Some(&artist),
+                            album: None,
+                            cover_url: None,
+                            duration: Some(Duration::from_millis(duration_ms.load(Ordering::Relaxed))),
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(ref mut c) = controls {
+            let st = state.read().unwrap();
+            let pos = position_ms.load(Ordering::Relaxed);
+            let dur = duration_ms.load(Ordering::Relaxed);
+            let progress = if dur > 0 {
+                Some(souvlaki::MediaPosition(Duration::from_millis(pos)))
+            } else {
+                None
+            };
+
+            match *st {
+                PlaybackState::Playing => {
+                    let _ = c.set_playback(MediaPlayback::Playing { progress });
+                }
+                PlaybackState::Paused => {
+                    let _ = c.set_playback(MediaPlayback::Paused { progress });
+                }
+                PlaybackState::Stopped | PlaybackState::Idle => {
+                    let _ = c.set_playback(MediaPlayback::Stopped);
+                }
+                _ => {}
             }
         }
 
