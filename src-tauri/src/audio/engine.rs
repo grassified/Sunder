@@ -342,7 +342,7 @@ fn audio_thread(
                 }
                 AudioCommand::UpdateMetadata { title, artist, thumbnail, track_id } => {
                     if Some(&track_id) != active_id.as_ref() {
-                        return;
+                        continue;
                     }
 
                     if let Some(ref mut c) = controls {
@@ -356,13 +356,8 @@ fn audio_thread(
                         let _ = c.set_metadata(metadata);
                     }
 
-                    // Trigger system notification in background so it never blocks audio
-                    let app_clone = app.clone();
-                    let t = title.clone();
-                    let a = artist.clone();
-                    tokio::spawn(async move {
-                        super::art_worker::trigger_notification(&app_clone, &t, &a);
-                    });
+                    // Trigger system notification directly
+                    super::art_worker::trigger_notification(&app, &title, &artist);
                 }
             }
         }
