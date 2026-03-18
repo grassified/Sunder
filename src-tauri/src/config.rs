@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub volume: f64,
     pub eq_enabled: bool,
     pub eq_gains: Vec<f64>,
+    pub notifications_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -15,6 +16,7 @@ impl Default for AppConfig {
             volume: 0.8,
             eq_enabled: false,
             eq_gains: vec![0.0; 10],
+            notifications_enabled: true,
         }
     }
 }

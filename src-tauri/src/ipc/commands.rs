@@ -105,6 +105,7 @@ pub async fn play_track(
         title, 
         artist, 
         thumbnail,
+        track_id: track_id.clone(),
     });
     let _ = db.record_listen(&track_id);
     Ok(())

@@ -41,6 +41,7 @@ pub enum AudioCommand {
         title: String,
         artist: String,
         thumbnail: String,
+        track_id: String,
     },
 }
 
@@ -148,6 +149,7 @@ fn audio_thread(
         }
     };
     eprintln!("[sunder] audio thread started, output device ready");
+    let mut active_id: Option<String> = None;
 
     let mut sink: Option<Sink> = None;
 
@@ -227,6 +229,7 @@ fn audio_thread(
                     *state.write().unwrap() = PlaybackState::Loading;
                     duration_ms.store(dur, Ordering::Release);
                     position_ms.store(0, Ordering::Release);
+                    active_id = Some(video_id.clone());
                     emit_state(&app, &state, &position_ms, &duration_ms);
 
                     let app_clone = app.clone();
@@ -337,7 +340,11 @@ fn audio_thread(
                         }
                     }
                 }
-                AudioCommand::UpdateMetadata { title, artist, thumbnail } => {
+                AudioCommand::UpdateMetadata { title, artist, thumbnail, track_id } => {
+                    if Some(&track_id) != active_id.as_ref() {
+                        return;
+                    }
+
                     if let Some(ref mut c) = controls {
                         let metadata = MediaMetadata {
                             title: Some(&title),
@@ -349,8 +356,13 @@ fn audio_thread(
                         let _ = c.set_metadata(metadata);
                     }
 
-                    // Trigger system notification immediately with URL
-                    super::art_worker::trigger_notification(&app, &title, &artist, Some(thumbnail));
+                    // Trigger system notification in background so it never blocks audio
+                    let app_clone = app.clone();
+                    let t = title.clone();
+                    let a = artist.clone();
+                    tokio::spawn(async move {
+                        super::art_worker::trigger_notification(&app_clone, &t, &a);
+                    });
                 }
             }
         }
@@ -610,7 +622,9 @@ fn start_streaming(
         expected_path.display()
     );
 
-    let file = std::fs::File::open(&expected_path).map_err(crate::error::AppError::Io)?;
+
+    let file = std::fs::File::open(&expected_path)
+        .map_err(crate::error::AppError::Io)?;
     let decoder = Decoder::new(io::BufReader::with_capacity(64 * 1024, file)) // this is to improve RAM usage. 64KB is enough.
         .map_err(|e| crate::error::AppError::Audio(format!("decoder init failed: {e}")))?;
 
