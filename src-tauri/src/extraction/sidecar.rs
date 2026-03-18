@@ -248,7 +248,7 @@ fn best_thumbnail(v: &serde_json::Value) -> String {
         // Pick a medium-res thumbnail (~320x180) instead of the largest one.
         // Using a huge thumbnail wastes VRAM when displayed at 48-200px in the UI.
         let target = thumbs.iter().find(|t| {
-            t["width"].as_u64().map_or(false, |w| (280..=400).contains(&w))
+            t["width"].as_u64().is_some_and(|w| (280..=400).contains(&w))
         });
         let chosen = target
             .or_else(|| thumbs.get(thumbs.len().min(2).saturating_sub(0).min(thumbs.len() - 1)))
