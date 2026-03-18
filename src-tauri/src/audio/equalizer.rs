@@ -197,6 +197,7 @@ impl<S: Source<Item = f32>> Source for EqSource<S> {
             }
         }
         self.fade_counter = 0;
+        self.channel_idx = 0;
         Ok(())
     }
 }
