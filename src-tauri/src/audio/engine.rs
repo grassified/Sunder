@@ -327,15 +327,12 @@ fn audio_thread(
                 }
                 AudioCommand::Seek(secs) => {
                     if let Some(ref s) = sink {
-                        let vol = *volume.read().unwrap();
-                        s.set_volume(vol * 0.05);
                         let d = Duration::from_secs_f64(secs.max(0.0));
                         if let Err(e) = s.try_seek(d) {
                             eprintln!("[sunder] seek failed: {e}");
                         } else {
                             position_ms.store((secs * 1000.0) as u64, Ordering::Release);
                         }
-                        s.set_volume(vol);
                     }
                 }
                 AudioCommand::UpdateMetadata {
