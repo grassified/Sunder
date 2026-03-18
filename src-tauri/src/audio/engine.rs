@@ -344,7 +344,7 @@ fn audio_thread(
                     video_id,
                     title,
                     artist,
-                    thumbnail_url,
+                    thumbnail,
                 } => {
                     if let Some(ref mut c) = controls {
                         let _ = c.set_metadata(MediaMetadata {
@@ -365,7 +365,7 @@ fn audio_thread(
                     let artist_clone = artist.clone();
                     std::thread::spawn(move || {
                         let path =
-                            super::art_worker::download_art(video_id_clone.clone(), thumbnail_url);
+                            super::art_worker::download_art(video_id_clone.clone(), thumbnail);
                         let _ = tx_clone.send(AudioCommand::ArtReady {
                             title: title_clone,
                             artist: artist_clone,
