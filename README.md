@@ -203,6 +203,14 @@ Audio is cached temporarily in `/tmp/sunder/` and automatically reused on replay
 - [x] Persistent settings (volume, EQ)
 - [ ] Local track downloads with library management
 
+## Contributing
+
+Interested in contributing? Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+**TL;DR: We do not accept mega-PRs.** If your PR touches more than 10 files or exceeds 500 lines of code, it will be rejected. Split it into smaller, atomic PRs. This includes AI-generated code. You are responsible for breaking it into review-sized chunks before submitting.
+
+Small, focused contributions get merged fast. Massive PRs get closed without review.
+
 ## License
 
 AGPLv3
