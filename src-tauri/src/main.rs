@@ -2,9 +2,7 @@
 
 fn main() {
     #[cfg(target_os = "linux")]
-    if std::env::var_os("APPIMAGE").is_some() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
 
     sunder_lib::run()
 }
