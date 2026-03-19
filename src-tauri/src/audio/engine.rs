@@ -37,11 +37,11 @@ pub enum AudioCommand {
     Stop,
     SetVolume(f32),
     Seek(f64),
-    #[allow(dead_code)]
     UpdateMetadata {
         title: String,
         artist: String,
-        thumbnail: Option<Vec<u8>>,
+        thumbnail: String,
+        track_id: String,
     },
 }
 
@@ -149,6 +149,7 @@ fn audio_thread(
         }
     };
     eprintln!("[sunder] audio thread started, output device ready");
+    let mut active_id: Option<String> = None;
 
     let mut sink: Option<Sink> = None;
 
@@ -228,6 +229,7 @@ fn audio_thread(
                     *state.write().unwrap() = PlaybackState::Loading;
                     duration_ms.store(dur, Ordering::Release);
                     position_ms.store(0, Ordering::Release);
+                    active_id = Some(video_id.clone());
                     emit_state(&app, &state, &position_ms, &duration_ms);
 
                     let app_clone = app.clone();
@@ -293,6 +295,7 @@ fn audio_thread(
                 } => {
                     if session_id == current_session.load(Ordering::SeqCst) {
                         *state.write().unwrap() = PlaybackState::Idle;
+                        active_id = None;
                         emit_state(&app, &state, &position_ms, &duration_ms);
                         let _ = app.emit(
                             "playback-error",
@@ -320,6 +323,7 @@ fn audio_thread(
                         s.stop();
                     }
                     *state.write().unwrap() = PlaybackState::Stopped;
+                    active_id = None;
                     position_ms.store(0, Ordering::Release);
                 }
                 AudioCommand::SetVolume(v) => {
@@ -338,22 +342,24 @@ fn audio_thread(
                         }
                     }
                 }
-                AudioCommand::UpdateMetadata {
-                    title,
-                    artist,
-                    thumbnail: _,
-                } => {
+                AudioCommand::UpdateMetadata { title, artist, thumbnail, track_id } => {
+                    if Some(&track_id) != active_id.as_ref() {
+                        continue;
+                    }
+
                     if let Some(ref mut c) = controls {
-                        let _ = c.set_metadata(MediaMetadata {
+                        let metadata = MediaMetadata {
                             title: Some(&title),
                             artist: Some(&artist),
                             album: None,
-                            cover_url: None,
-                            duration: Some(Duration::from_millis(
-                                duration_ms.load(Ordering::Relaxed),
-                            )),
-                        });
+                            cover_url: Some(&thumbnail),
+                            duration: Some(Duration::from_millis(duration_ms.load(Ordering::Relaxed))),
+                        };
+                        let _ = c.set_metadata(metadata);
                     }
+
+                    // Trigger system notification directly
+                    super::art_worker::trigger_notification(&app, &title, &artist);
                 }
             }
         }
@@ -422,6 +428,7 @@ fn audio_thread(
                 s.stop();
             }
             *state.write().unwrap() = PlaybackState::Idle;
+            active_id = None;
             position_ms.store(0, Ordering::Release);
             let _ = app.emit("track-finished", ());
         }
