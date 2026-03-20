@@ -16,12 +16,12 @@
   }
 
   async function handlePrev() {
-    const prev = player.prevTrack();
+    const prev = player.prevTrack(true);
     if (prev) await playTrack(prev);
   }
 
   async function handleNext() {
-    const next = player.nextTrack();
+    const next = player.nextTrack(true);
     if (next) await playTrack(next);
   }
 

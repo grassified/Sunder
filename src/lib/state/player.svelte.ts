@@ -32,8 +32,8 @@ class PlayerState {
   progress = $derived(this.duration > 0 ? this.currentTime / this.duration : 0);
   formattedTime = $derived(formatTime(this.currentTime));
   formattedDuration = $derived(formatTime(this.duration));
-  hasNext = $derived(this.queueIndex < this.queue.length - 1);
-  hasPrev = $derived(this.queueIndex > 0);
+  hasNext = $derived(this.queueIndex < this.queue.length - 1 || (this.repeatMode === "queue" && this.queue.length > 0));
+  hasPrev = $derived(this.queueIndex > 0 || (this.repeatMode === "queue" && this.queue.length > 0));
 
   updateFromProgress(p: PlaybackProgress) {
     if (!this.isSeeking) {
@@ -90,8 +90,8 @@ class PlayerState {
     return null;
   }
 
-  nextTrack(): Track | null {
-    if (this.repeatMode === "track") {
+  nextTrack(manual = false): Track | null {
+    if (!manual && this.repeatMode === "track") {
       return this.queue[this.queueIndex] ?? null;
     }
     if (this.queueIndex < this.queue.length - 1) {
@@ -117,9 +117,16 @@ class PlayerState {
     }
   }
 
-  prevTrack(): Track | null {
+  prevTrack(manual = false): Track | null {
+    if (!manual && this.repeatMode === "track") {
+      return this.queue[this.queueIndex] ?? null;
+    }
     if (this.queueIndex > 0) {
       this.queueIndex--;
+      return this.queue[this.queueIndex];
+    }
+    if (this.repeatMode === "queue" && this.queue.length > 0) {
+      this.queueIndex = this.queue.length - 1;
       return this.queue[this.queueIndex];
     }
     return null;

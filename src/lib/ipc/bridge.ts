@@ -45,7 +45,7 @@ export async function playNext(): Promise<void> {
   if (advancing) return;
   advancing = true;
   try {
-    const next = player.nextTrack();
+    const next = player.nextTrack(true);
     if (next) {
       await playTrack(next);
     }
@@ -55,7 +55,7 @@ export async function playNext(): Promise<void> {
 }
 
 export async function playPrev(): Promise<void> {
-  const prev = player.prevTrack();
+  const prev = player.prevTrack(true);
   if (prev) {
     await playTrack(prev);
   }
