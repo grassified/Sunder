@@ -27,6 +27,8 @@ class PlayerState {
   eqPreset = $state("Flat");
   showEq = $state(false);
 
+  repeatMode = $state<"off" | "queue" | "track">("off");
+
   progress = $derived(this.duration > 0 ? this.currentTime / this.duration : 0);
   formattedTime = $derived(formatTime(this.currentTime));
   formattedDuration = $derived(formatTime(this.duration));
@@ -89,12 +91,30 @@ class PlayerState {
   }
 
   nextTrack(): Track | null {
+    if (this.repeatMode === "track") {
+      return this.queue[this.queueIndex] ?? null;
+    }
     if (this.queueIndex < this.queue.length - 1) {
       this.queueIndex++;
       this.prefetchAhead(this.queueIndex);
       return this.queue[this.queueIndex];
     }
+    if (this.repeatMode === "queue" && this.queue.length > 0) {
+      this.queueIndex = 0;
+      this.prefetchAhead(0);
+      return this.queue[0];
+    }
     return null;
+  }
+
+  cycleRepeat() {
+    if (this.repeatMode === "off") {
+      this.repeatMode = "queue";
+    } else if (this.repeatMode === "queue") {
+      this.repeatMode = "track";
+    } else {
+      this.repeatMode = "off";
+    }
   }
 
   prevTrack(): Track | null {
