@@ -162,7 +162,7 @@ export function initProgressListener(): () => void {
   }).then((fn) => { unlistenDownload = fn; });
 
   listen("track-finished", () => {
-    playNext();
+    playNext().catch((e) => console.error("Failed to play next track after finish:", e));
   }).then((fn) => { unlistenFinished = fn; });
 
   listen<{ video_id: string; error: string }>("playback-error", (event) => {
@@ -176,25 +176,25 @@ export function initProgressListener(): () => void {
     if (player.consecutiveErrors < 3 && player.hasNext) {
       setTimeout(() => {
         if (player.currentTrack?.id === failedId && !player.findingAlt) {
-          playNext();
+          playNext().catch((e) => console.error("Failed to play next track after error:", e));
         }
       }, 4000);
     }
   }).then((fn) => { unlistenError = fn; });
 
   listen("media-next", () => {
-    playNext();
+    playNext().catch((e) => console.error("Media key next failed:", e));
   }).then((fn) => { unlistenNext = fn; });
 
   listen("media-previous", () => {
-    playPrev();
+    playPrev().catch((e) => console.error("Media key previous failed:", e));
   }).then((fn) => { unlistenPrev = fn; });
 
   listen("media-toggle", () => {
     if (player.isPlaying) {
-      pause();
+      pause().catch((e) => console.error("Media key pause failed:", e));
     } else {
-      resume();
+      resume().catch((e) => console.error("Media key resume failed:", e));
     }
   }).then((fn) => { unlistenToggle = fn; });
 
