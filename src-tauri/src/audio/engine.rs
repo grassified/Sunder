@@ -151,7 +151,7 @@ fn audio_thread(
     };
     eprintln!("[sunder] audio thread started, output device ready");
     let mut active_id: Option<String> = None;
-
+    let mut current_repeat_mode = "off".to_string();
     let mut sink: Option<Sink> = None;
 
     let mut controls = match MediaControls::new(PlatformConfig {
@@ -360,15 +360,15 @@ fn audio_thread(
                     }
 
                     // Re-emit loop status on metadata updates to ensure UI capabilities (CanLoop) are refreshed
-                    // Since we don't have the current mode here (it's in the frontend), we'll just emit "off"
-                    // which announces CanLoop: true. When the user eventually cycles it, the real mode will be sent.
-                    emit_loop_status("off");
+                    // Using the stored current_repeat_mode ensures MPRIS stays in sync with user selection.
+                    emit_loop_status(&current_repeat_mode);
 
                     // Trigger system notification directly
                     super::art_worker::trigger_notification(&app, &title, &artist);
                 }
                 AudioCommand::SetRepeat(mode) => {
-                    emit_loop_status(&mode);
+                    current_repeat_mode = mode;
+                    emit_loop_status(&current_repeat_mode);
                 }
             }
         }
