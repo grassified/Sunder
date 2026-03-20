@@ -185,10 +185,8 @@ pub async fn get_eq_settings(audio: State<'_, AudioHandle>) -> Result<serde_json
 }
 
 #[tauri::command]
-pub async fn set_repeat_mode(mode: String, _audio: State<'_, AudioHandle>) -> Result<(), String> {
-    // souvlaki 0.8.3 does not currently support setting repeat mode. 
-    // This is a no-op until library support is added or a custom solution is implemented.
-    let _ = mode;
+pub async fn set_repeat_mode(mode: String, audio: State<'_, AudioHandle>) -> Result<(), String> {
+    audio.send(AudioCommand::SetRepeat(mode));
     Ok(())
 }
 

@@ -43,7 +43,7 @@ pub enum AudioCommand {
         thumbnail: String,
         track_id: String,
     },
-    // TODO: Add SetRepeat(RepeatMode) when souvlaki supports it (v0.8.3 does not)
+    SetRepeat(String),
 }
 
 pub struct AudioHandle {
@@ -362,6 +362,9 @@ fn audio_thread(
                     // Trigger system notification directly
                     super::art_worker::trigger_notification(&app, &title, &artist);
                 }
+                AudioCommand::SetRepeat(mode) => {
+                    emit_loop_status(&mode);
+                }
             }
         }
 
@@ -664,4 +667,47 @@ fn parse_download_pct(line: &str) -> Option<f64> {
     let content = line.trim().strip_prefix("[download]")?;
     let pct_end = content.find('%')?;
     content[..pct_end].trim().parse::<f64>().ok()
+}
+
+/// Emit an MPRIS `PropertiesChanged` signal for `LoopStatus` on the session D-Bus.
+/// `mode` should be "None", "Track", or "Playlist" per the MPRIS spec.
+/// Compiled only on Linux; a no-op elsewhere.
+fn emit_loop_status(mode: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        use dbus::channel::Sender;
+
+        // Map Sunder's mode names to MPRIS LoopStatus values
+        let loop_status = match mode {
+            "track" => "Track",
+            "queue"  => "Playlist",
+            _        => "None",
+        };
+
+        let Ok(conn) = dbus::blocking::Connection::new_session() else { return };
+
+        // Build and send a PropertiesChanged signal for org.mpris.MediaPlayer2.Player
+        use dbus::arg::PropMap;
+        let mut changed: PropMap = PropMap::new();
+        changed.insert(
+            "LoopStatus".to_owned(),
+            dbus::arg::Variant(Box::new(loop_status.to_owned())),
+        );
+        let invalidated: Vec<String> = Vec::new();
+
+        let msg = dbus::Message::signal(
+            &dbus::Path::new("/org/mpris/MediaPlayer2").unwrap(),
+            &dbus::strings::Interface::new("org.freedesktop.DBus.Properties").unwrap(),
+            &dbus::strings::Member::new("PropertiesChanged").unwrap(),
+        )
+        .append3(
+            "org.mpris.MediaPlayer2.Player",
+            changed,
+            invalidated,
+        );
+
+        let _ = conn.send(msg);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = mode;
 }
