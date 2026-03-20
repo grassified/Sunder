@@ -41,11 +41,11 @@ export async function playTrack(track: Track): Promise<void> {
 
 let advancing = false;
 
-export async function playNext(): Promise<void> {
+export async function playNext(manual = false): Promise<void> {
   if (advancing) return;
   advancing = true;
   try {
-    const next = player.nextTrack(true);
+    const next = player.nextTrack(manual);
     if (next) {
       await playTrack(next);
     }
@@ -54,8 +54,8 @@ export async function playNext(): Promise<void> {
   }
 }
 
-export async function playPrev(): Promise<void> {
-  const prev = player.prevTrack(true);
+export async function playPrev(manual = false): Promise<void> {
+  const prev = player.prevTrack(manual);
   if (prev) {
     await playTrack(prev);
   }
