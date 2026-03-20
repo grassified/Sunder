@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use rodio::{Decoder, OutputStream, Sink, Source};
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig, RepeatMode};
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
 use tauri::{Emitter, Manager};
 
 /// Wrapper to send a raw HWND pointer across threads.
@@ -43,7 +43,7 @@ pub enum AudioCommand {
         thumbnail: String,
         track_id: String,
     },
-    SetRepeat(RepeatMode),
+    // TODO: Add SetRepeat(RepeatMode) when souvlaki supports it (v0.8.3 does not)
 }
 
 pub struct AudioHandle {
@@ -361,11 +361,6 @@ fn audio_thread(
 
                     // Trigger system notification directly
                     super::art_worker::trigger_notification(&app, &title, &artist);
-                }
-                AudioCommand::SetRepeat(mode) => {
-                    if let Some(ref mut c) = controls {
-                        let _ = c.set_repeat_mode(mode);
-                    }
                 }
             }
         }
