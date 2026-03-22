@@ -16,17 +16,21 @@
   }
 
   async function handlePrev() {
-    const prev = player.prevTrack();
+    const prev = player.prevTrack(true);
     if (prev) await playTrack(prev);
   }
 
   async function handleNext() {
-    const next = player.nextTrack();
+    const next = player.nextTrack(true);
     if (next) await playTrack(next);
   }
 
   function handleShuffle() {
     player.shuffle();
+  }
+
+  function handleRepeat() {
+    player.cycleRepeat();
   }
 
   async function findAlternative() {
@@ -162,6 +166,23 @@
       </div>
 
       <div class="right-section">
+        <button
+          class="ctrl-btn ctrl-sm"
+          class:active-toggle={player.repeatMode !== "off"}
+          onclick={handleRepeat}
+          aria-label={player.repeatMode === "track" ? "Repeat Track" : player.repeatMode === "queue" ? "Repeat Queue" : "Repeat"}
+          title={player.repeatMode === "track" ? "Repeat Track" : player.repeatMode === "queue" ? "Repeat Queue" : "Repeat"}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="17 1 21 5 17 9" />
+            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+            <polyline points="7 23 3 19 7 15" />
+            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+            {#if player.repeatMode === "track"}
+              <text x="12" y="14" font-size="7" text-anchor="middle" stroke="none" fill="currentColor" font-weight="bold">1</text>
+            {/if}
+          </svg>
+        </button>
         <button class="ctrl-btn ctrl-sm" onclick={() => player.showEq = !player.showEq} aria-label="Equalizer" class:active-toggle={player.showEq}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />

@@ -41,11 +41,11 @@ export async function playTrack(track: Track): Promise<void> {
 
 let advancing = false;
 
-export async function playNext(): Promise<void> {
+export async function playNext(manual = false): Promise<void> {
   if (advancing) return;
   advancing = true;
   try {
-    const next = player.nextTrack();
+    const next = player.nextTrack(manual);
     if (next) {
       await playTrack(next);
     }
@@ -54,8 +54,8 @@ export async function playNext(): Promise<void> {
   }
 }
 
-export async function playPrev(): Promise<void> {
-  const prev = player.prevTrack();
+export async function playPrev(manual = false): Promise<void> {
+  const prev = player.prevTrack(manual);
   if (prev) {
     await playTrack(prev);
   }
@@ -141,6 +141,10 @@ export async function setEqEnabled(enabled: boolean): Promise<void> {
 
 export async function getEqSettings(): Promise<EqSettings> {
   return invoke<EqSettings>("get_eq_settings");
+}
+
+export async function setRepeatMode(mode: "off" | "queue" | "track"): Promise<void> {
+  await invoke("set_repeat_mode", { mode });
 }
 
 export function initProgressListener(): () => void {

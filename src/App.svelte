@@ -75,11 +75,11 @@
         break;
       case "n":
         e.preventDefault();
-        await playNext();
+        await playNext(true);
         break;
       case "p":
         e.preventDefault();
-        await playPrev();
+        await playPrev(true);
         break;
       case "f":
         e.preventDefault();

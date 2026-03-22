@@ -43,6 +43,7 @@ pub enum AudioCommand {
         thumbnail: String,
         track_id: String,
     },
+    SetRepeat(String),
 }
 
 pub struct AudioHandle {
@@ -150,7 +151,6 @@ fn audio_thread(
     };
     eprintln!("[sunder] audio thread started, output device ready");
     let mut active_id: Option<String> = None;
-
     let mut sink: Option<Sink> = None;
 
     let mut controls = match MediaControls::new(PlatformConfig {
@@ -362,6 +362,9 @@ fn audio_thread(
 
                     // Trigger system notification directly
                     super::art_worker::trigger_notification(&app, &title, &artist);
+                }
+                AudioCommand::SetRepeat(_mode) => {
+                    // Stored for future MPRIS LoopStatus integration
                 }
             }
         }

@@ -1,5 +1,5 @@
 import type { Track, PlaybackProgress } from "../types";
-import { prefetchTrack } from "../ipc/bridge";
+import { prefetchTrack, setRepeatMode } from "../ipc/bridge";
 
 const PREFETCH_AHEAD = 2;
 
@@ -27,11 +27,13 @@ class PlayerState {
   eqPreset = $state("Flat");
   showEq = $state(false);
 
+  repeatMode = $state<"off" | "queue" | "track">("off");
+
   progress = $derived(this.duration > 0 ? this.currentTime / this.duration : 0);
   formattedTime = $derived(formatTime(this.currentTime));
   formattedDuration = $derived(formatTime(this.duration));
-  hasNext = $derived(this.queueIndex < this.queue.length - 1);
-  hasPrev = $derived(this.queueIndex > 0);
+  hasNext = $derived(this.queueIndex < this.queue.length - 1 || (this.repeatMode === "queue" && this.queue.length > 0));
+  hasPrev = $derived(this.queueIndex > 0 || (this.repeatMode === "queue" && this.queue.length > 0));
 
   updateFromProgress(p: PlaybackProgress) {
     if (!this.isSeeking) {
@@ -89,18 +91,44 @@ class PlayerState {
     return null;
   }
 
-  nextTrack(): Track | null {
+  nextTrack(manual = false): Track | null {
+    if (!manual && this.repeatMode === "track") {
+      return this.queue[this.queueIndex] ?? null;
+    }
     if (this.queueIndex < this.queue.length - 1) {
       this.queueIndex++;
       this.prefetchAhead(this.queueIndex);
       return this.queue[this.queueIndex];
     }
+    if (this.repeatMode === "queue" && this.queue.length > 0) {
+      this.queueIndex = 0;
+      this.prefetchAhead(0);
+      return this.queue[0];
+    }
     return null;
   }
 
-  prevTrack(): Track | null {
+  cycleRepeat() {
+    if (this.repeatMode === "off") {
+      this.repeatMode = "queue";
+    } else if (this.repeatMode === "queue") {
+      this.repeatMode = "track";
+    } else {
+      this.repeatMode = "off";
+    }
+    setRepeatMode(this.repeatMode).catch(() => {});
+  }
+
+  prevTrack(manual = false): Track | null {
+    if (!manual && this.repeatMode === "track") {
+      return this.queue[this.queueIndex] ?? null;
+    }
     if (this.queueIndex > 0) {
       this.queueIndex--;
+      return this.queue[this.queueIndex];
+    }
+    if (this.repeatMode === "queue" && this.queue.length > 0) {
+      this.queueIndex = this.queue.length - 1;
       return this.queue[this.queueIndex];
     }
     return null;

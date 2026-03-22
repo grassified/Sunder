@@ -185,6 +185,15 @@ pub async fn get_eq_settings(audio: State<'_, AudioHandle>) -> Result<serde_json
 }
 
 #[tauri::command]
+pub async fn set_repeat_mode(mode: String, audio: State<'_, AudioHandle>) -> Result<(), String> {
+    if !["off", "queue", "track"].contains(&mode.as_str()) {
+        return Err(format!("Invalid repeat mode: {}", mode));
+    }
+    audio.send(AudioCommand::SetRepeat(mode));
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn search_local(query: String, db: State<'_, SearchCache>) -> Result<Vec<Track>, String> {
     db.search_local(&query).map_err(|e| e.to_string())
 }
