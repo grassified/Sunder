@@ -144,7 +144,7 @@
             <line x1="4" y1="4" x2="9" y2="9" />
           </svg>
         </button>
-        <button class="ctrl-btn ctrl-sm" onclick={handlePrev} aria-label="Previous" disabled={!player.hasPrev}>
+        <button class="ctrl-btn ctrl-sm" onclick={handlePrev} aria-label="Previous" disabled={!player.hasPrev && player.currentTime <= 5}>
           <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" stroke-width="2"/></svg>
         </button>
         <button class="ctrl-btn" onclick={togglePlay} aria-label={player.isPlaying ? "Pause" : "Play"}>
