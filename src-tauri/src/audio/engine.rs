@@ -398,9 +398,7 @@ fn audio_thread(
                 AudioCommand::SetVolume(v) => {
                     *volume.write().unwrap() = v;
                     if let Some(ref s) = sink {
-                        if current_fade.is_none() {
-                            s.set_volume(v);
-                        }
+                        s.set_volume(v);
                     }
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                 }
