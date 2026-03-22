@@ -343,8 +343,10 @@ fn audio_thread(
                         if let Some(f) = current_fade.take() {
                             f.abort();
                         }
-                        // Keep state as Playing (or current) during fade-out
-                        // state is NOT updated here immediately to avoid breaking end-of-track detection
+                        // Transition to Pausing immediately for UI responsiveness
+                        *state.write().unwrap() = PlaybackState::Pausing;
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+
                         let state_clone = state.clone();
                         current_fade = Some(tauri::async_runtime::spawn(async move {
                             let start_vol = s.volume();
@@ -404,8 +406,9 @@ fn audio_thread(
                 AudioCommand::SetVolume(v) => {
                     *volume.write().unwrap() = v;
                     if let Some(ref s) = sink {
-                        // Skip direct update if paused to allow Resume to ramp from 0.0
-                        if *state.read().unwrap() != PlaybackState::Paused {
+                        // Skip direct update if paused/pausing to allow Resume to ramp from 0.0 or current
+                        let st = state.read().unwrap().clone();
+                        if st != PlaybackState::Paused && st != PlaybackState::Pausing {
                             s.set_volume(v);
                         }
                     }
@@ -492,14 +495,14 @@ fn audio_thread(
                 // (guards against decoders that don't EOF cleanly)
                 if dur > 0
                     && pos_ms > dur + 2000
-                    && *state.read().unwrap() == PlaybackState::Playing
+                    && matches!(*state.read().unwrap(), PlaybackState::Playing | PlaybackState::Pausing)
                 {
                     eprintln!(
                         "[sunder] position ({pos_ms}ms) exceeded duration ({dur}ms), forcing track end"
                     );
                     track_ended = true;
                 }
-            } else if *state.read().unwrap() == PlaybackState::Playing {
+            } else if matches!(*state.read().unwrap(), PlaybackState::Playing | PlaybackState::Pausing) {
                 eprintln!("[sunder] track finished");
                 track_ended = true;
             }
