@@ -228,7 +228,7 @@ fn audio_thread(
             match cmd {
                 AudioCommand::Play { video_id, duration_ms: dur } => {
                     if let Some(s) = sink.take() {
-                        current_fade_token.fetch_add(1, Ordering::SeqCst);
+                        let _fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
                         if let Some(f) = current_fade.take() {
                             f.abort();
                         }
@@ -392,10 +392,15 @@ fn audio_thread(
                         emit_state(&app, &state, &position_ms, &duration_ms, &volume);
 
                         let volume_handle = volume.clone();
+                        let token_handle = current_fade_token.clone();
                         current_fade = Some(tauri::async_runtime::spawn(async move {
                             let start_vol = s.volume();
                             let steps = 10;
                             for i in 1..=steps {
+                                // Interruption check
+                                if token_handle.load(Ordering::SeqCst) != fade_token {
+                                    return;
+                                }
                                 let vol_target = *volume_handle.read().unwrap();
                                 let progress = i as f32 / steps as f32;
                                 s.set_volume(start_vol + (vol_target - start_vol) * progress);
@@ -405,9 +410,9 @@ fn audio_thread(
                     }
                 }
                 AudioCommand::Stop => {
-                    // Invalidate current session to reject any pending loader results
+                    // Invalidate current session and fades to reject pending tasks
                     current_session.fetch_add(1, Ordering::SeqCst);
-                    current_fade_token.fetch_add(1, Ordering::SeqCst);
+                    let _fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
 
                     if let Some(s) = sink.take() {
                         if let Some(f) = current_fade.take() {
