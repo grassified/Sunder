@@ -25,6 +25,7 @@
   let detailTracks = $state<Track[]>([]);
   let newName = $state("");
   let creating = $state(false);
+  let failedThumbnails = $state(new Set<number>());
 
   let viewing = $derived(nav.activeTab === "playlist-detail" && nav.activePlaylistId !== null);
 
@@ -62,17 +63,15 @@
   let importing = $state(false);
   let showImportForm = $state(false);
   let importUrl = $state("");
-  let importName = $state("");
 
   async function handleImport() {
     if (!importUrl.trim()) return;
     importing = true;
     try {
-      const p = await importYtPlaylist(importUrl.trim(), importName.trim() || "Imported Playlist");
+      const p = await importYtPlaylist(importUrl.trim(), "");
       await refreshPlaylists();
       toastState.add(`Imported "${p.name}" (${p.track_count} tracks)`, "info");
       importUrl = "";
-      importName = "";
       showImportForm = false;
     } catch (e) {
       console.error("import:", e);
@@ -84,7 +83,7 @@
 
   function handleImportKeydown(e: KeyboardEvent) {
     if (e.key === "Enter") handleImport();
-    if (e.key === "Escape") { showImportForm = false; importUrl = ""; importName = ""; }
+    if (e.key === "Escape") { showImportForm = false; importUrl = ""; }
   }
 
   async function handleDelete(id: number) {
@@ -337,12 +336,6 @@
           bind:value={importUrl}
           onkeydown={handleImportKeydown}
         />
-        <input
-          type="text"
-          placeholder="Playlist name (optional)"
-          bind:value={importName}
-          onkeydown={handleImportKeydown}
-        />
         <button class="create-btn" onclick={handleImport} disabled={importing || !importUrl.trim()}>
           {importing ? "Importing..." : "Import"}
         </button>
@@ -360,11 +353,21 @@
           <div class="playlist-row">
             <button class="playlist-btn" onclick={(e) => { if (renamingId === p.id) e.preventDefault(); else openPlaylist(p); }}>
               <div class="playlist-icon">
+                {#if p.thumbnail && !failedThumbnails.has(p.id)}
+                  <img
+                    src={p.thumbnail}
+                    alt=""
+                    class="playlist-thumb"
+                    loading="lazy"
+                    onerror={() => failedThumbnails.add(p.id)}
+                  />
+                {:else}
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M9 18V5l12-2v13" />
                     <circle cx="6" cy="18" r="3" />
                     <circle cx="18" cy="16" r="3" />
                   </svg>
+                {/if}
               </div>
               <div class="playlist-info">
                 {#if renamingId === p.id}
@@ -559,6 +562,12 @@
   }
 
   .playlist-icon svg { width: 20px; height: 20px; }
+  .playlist-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+  }
 
   .playlist-info {
     display: flex;

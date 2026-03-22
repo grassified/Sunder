@@ -53,6 +53,7 @@ impl SearchCache {
              CREATE TABLE IF NOT EXISTS playlists (
                  id       INTEGER PRIMARY KEY AUTOINCREMENT,
                  name     TEXT NOT NULL,
+                 thumbnail TEXT NOT NULL DEFAULT '',
                  created  TEXT NOT NULL DEFAULT (datetime('now'))
              );
 
@@ -72,6 +73,14 @@ impl SearchCache {
              CREATE INDEX IF NOT EXISTS idx_history_track ON listen_history(track_id);
              CREATE INDEX IF NOT EXISTS idx_history_played ON listen_history(played DESC);",
         )?;
+
+        // Migration: add thumbnail to playlists if missing
+        if let Err(e) = conn.execute("ALTER TABLE playlists ADD COLUMN thumbnail TEXT NOT NULL DEFAULT ''", []) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column name") {
+                eprintln!("[sunder] playlists thumbnail migration failed: {e}");
+            }
+        }
 
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -151,24 +160,37 @@ impl SearchCache {
         Ok(tracks)
     }
 
-    pub fn create_playlist(&self, name: &str) -> Result<Playlist, AppError> {
+    pub fn create_playlist(&self, name: &str, thumbnail: &str) -> Result<Playlist, AppError> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("INSERT INTO playlists (name) VALUES (?1)", params![name])?;
+        conn.execute(
+            "INSERT INTO playlists (name, thumbnail) VALUES (?1, ?2)",
+            params![name, thumbnail],
+        )?;
         let id = conn.last_insert_rowid();
-        Ok(Playlist { id, name: name.to_string(), track_count: 0 })
+        Ok(Playlist {
+            id,
+            name: name.to_string(),
+            thumbnail: thumbnail.to_string(),
+            track_count: 0,
+        })
     }
 
     pub fn list_playlists(&self) -> Result<Vec<Playlist>, AppError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare_cached(
-            "SELECT p.id, p.name, COUNT(pt.track_id)
+            "SELECT p.id, p.name, p.thumbnail, COUNT(pt.track_id)
              FROM playlists p
              LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
              GROUP BY p.id ORDER BY p.created DESC",
         )?;
         let rows = stmt
             .query_map([], |row| {
-                Ok(Playlist { id: row.get(0)?, name: row.get(1)?, track_count: row.get(2)? })
+                Ok(Playlist {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    thumbnail: row.get(2)?,
+                    track_count: row.get(3)?,
+                })
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -479,7 +501,7 @@ mod tests {
         let db = temp_cache();
         db.upsert_tracks(&[sample_track("t1"), sample_track("t2")]).unwrap();
 
-        let pl = db.create_playlist("My List").unwrap();
+        let pl = db.create_playlist("My List", "").unwrap();
         assert_eq!(pl.name, "My List");
 
         db.add_to_playlist(pl.id, "t1").unwrap();
