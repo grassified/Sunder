@@ -23,7 +23,7 @@ class PlayerState {
   findingAlt = $state(false);
   sleepTimerRemaining = $state<number | null>(null);
   sleepTimerSetMinutes = $state<number | null>(null);
-  sleepTimerHandle = $state<ReturnType<typeof setInterval> | null>(null);
+  private sleepTimerHandle: ReturnType<typeof setInterval> | null = null;
 
   eqEnabled = $state(false);
   eqGains = $state<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
