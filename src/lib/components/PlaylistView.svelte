@@ -359,7 +359,7 @@
                     alt=""
                     class="playlist-thumb"
                     loading="lazy"
-                    onerror={() => failedThumbnails.add(p.id)}
+                    onerror={() => failedThumbnails = new Set([...failedThumbnails, p.id])}
                   />
                 {:else}
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
