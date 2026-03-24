@@ -17,6 +17,9 @@ unsafe impl Send for RawHwnd {}
 use super::equalizer::{EqSettings, EqSource};
 use super::state::PlaybackState;
 
+const FADE_STEPS: u32 = 10;
+const FADE_STEP_MS: u64 = 10;
+
 pub enum AudioCommand {
     Play {
         video_id: String,
@@ -220,7 +223,7 @@ fn audio_thread(
     let mut active_fade: Option<ActiveFade> = None;
 
     loop {
-        let timeout = if active_fade.is_some() { 10 } else { 50 };
+        let timeout = if active_fade.is_some() { FADE_STEP_MS } else { 50 };
         let first = rx.recv_timeout(Duration::from_millis(timeout));
 
         let mut cmds: Vec<AudioCommand> = Vec::new();
@@ -241,9 +244,9 @@ fn audio_thread(
                     active_fade = None;
                     if let Some(s) = sink.take() {
                         let start_vol = s.volume();
-                        for i in (0..10).rev() {
-                            s.set_volume(start_vol * (i as f32 / 10.0));
-                            std::thread::sleep(Duration::from_millis(10));
+                        for i in (0..FADE_STEPS).rev() {
+                            s.set_volume(start_vol * (i as f32 / FADE_STEPS as f32));
+                            std::thread::sleep(Duration::from_millis(FADE_STEP_MS));
                         }
                         s.stop();
                     }
@@ -314,7 +317,7 @@ fn audio_thread(
                         active_fade = Some(ActiveFade {
                             start_vol: 0.0,
                             target_vol: *volume.read().unwrap(),
-                            steps_total: 10,
+                            steps_total: FADE_STEPS,
                             steps_taken: 0,
                             action: FadeAction::SetVolume,
                         });
@@ -342,14 +345,10 @@ fn audio_thread(
                 }
                 AudioCommand::Pause => {
                     if let Some(ref s) = sink {
-                        // Change state immediately for frontend responsiveness!
-                        *state.write().unwrap() = PlaybackState::Paused;
-                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
-
                         active_fade = Some(ActiveFade {
                             start_vol: s.volume(),
                             target_vol: 0.0,
-                            steps_total: 10,
+                            steps_total: FADE_STEPS,
                             steps_taken: 0,
                             action: FadeAction::Pause,
                         });
@@ -364,7 +363,7 @@ fn audio_thread(
                         active_fade = Some(ActiveFade {
                             start_vol: s.volume(),
                             target_vol: *volume.read().unwrap(),
-                            steps_total: 10,
+                            steps_total: FADE_STEPS,
                             steps_taken: 0,
                             action: FadeAction::SetVolume,
                         });
@@ -376,9 +375,9 @@ fn audio_thread(
 
                     if let Some(s) = sink.take() {
                         let start_vol = s.volume();
-                        for i in (0..10).rev() {
-                            s.set_volume(start_vol * (i as f32 / 10.0));
-                            std::thread::sleep(Duration::from_millis(10));
+                        for i in (0..FADE_STEPS).rev() {
+                            s.set_volume(start_vol * (i as f32 / FADE_STEPS as f32));
+                            std::thread::sleep(Duration::from_millis(FADE_STEP_MS));
                         }
                         s.stop();
                     }
@@ -393,8 +392,12 @@ fn audio_thread(
                         // Skip direct update if paused to allow Resume to ramp from 0.0 or current
                         let st = state.read().unwrap().clone();
                         if st != PlaybackState::Paused {
-                            s.set_volume(v);
-                            active_fade = None;
+                            if let Some(ref mut f) = active_fade {
+                                f.target_vol = v;
+                            } else {
+                                s.set_volume(v);
+                                active_fade = None;
+                            }
                         }
                     }
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume);
@@ -445,7 +448,11 @@ fn audio_thread(
             if f.steps_taken >= f.steps_total {
                 match f.action {
                     FadeAction::Pause => {
-                        if let Some(ref s) = sink { s.pause(); }
+                        if let Some(ref s) = sink {
+                            s.pause();
+                        }
+                        *state.write().unwrap() = PlaybackState::Paused;
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                     }
                     FadeAction::SetVolume => {}
                 }
