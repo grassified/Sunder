@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { pause, resume, stop, playTrack, search } from "../ipc/bridge";
+  import { pause, resume, stop, playTrack, playPrev, search } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { config } from "../state/config.svelte";
   import ProgressBar from "./ProgressBar.svelte";
   import VolumeControl from "./VolumeControl.svelte";
   import Equalizer from "./Equalizer.svelte";
+  import SleepTimer from "./SleepTimer.svelte";
   import { lyricsState } from "../state/lyrics.svelte";
 
   async function togglePlay() {
@@ -16,8 +17,7 @@
   }
 
   async function handlePrev() {
-    const prev = player.prevTrack(true);
-    if (prev) await playTrack(prev);
+    await playPrev(true);
   }
 
   async function handleNext() {
@@ -145,7 +145,7 @@
             <line x1="4" y1="4" x2="9" y2="9" />
           </svg>
         </button>
-        <button class="ctrl-btn ctrl-sm" onclick={handlePrev} aria-label="Previous" disabled={!player.hasPrev}>
+        <button class="ctrl-btn ctrl-sm" onclick={handlePrev} aria-label="Previous" disabled={!player.hasPrev && player.currentTime <= 5}>
           <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" stroke-width="2"/></svg>
         </button>
         <button class="ctrl-btn" onclick={togglePlay} aria-label={player.isPlaying ? "Pause" : "Play"}>
@@ -214,6 +214,7 @@
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
         </button>
+        <SleepTimer />
         <span class="time-display">
           {player.formattedTime} / {player.formattedDuration}
         </span>
