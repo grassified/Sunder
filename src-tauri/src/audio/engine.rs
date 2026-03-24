@@ -260,7 +260,6 @@ fn audio_thread(
                     let app_clone = app.clone();
                     let state_clone = state.clone();
                     let stream_handle_clone = stream_handle.clone();
-                    let volume_clone = volume.clone();
                     let eq_settings_clone = eq_settings.clone();
                     let tx_clone = tx.clone();
                     let video_id_clone = video_id.clone();
@@ -271,12 +270,10 @@ fn audio_thread(
                         if session_clone.load(Ordering::SeqCst) != session_id {
                             return;
                         }
-                        let vol = *volume_clone.read().unwrap();
                         match start_streaming(
                             &video_id_clone,
                             &state_clone,
                             &stream_handle_clone,
-                            vol,
                             &eq_settings_clone,
                             &app_clone,
                         ) {
@@ -396,7 +393,6 @@ fn audio_thread(
                                 f.target_vol = v;
                             } else {
                                 s.set_volume(v);
-                                active_fade = None;
                             }
                         }
                     }
@@ -553,7 +549,6 @@ fn start_streaming(
     video_id: &str,
     state: &Arc<RwLock<PlaybackState>>,
     stream_handle: &rodio::OutputStreamHandle,
-    _volume: f32,
     eq_settings: &Arc<RwLock<EqSettings>>,
     app: &tauri::AppHandle,
 ) -> Result<Sink, crate::error::AppError> {
