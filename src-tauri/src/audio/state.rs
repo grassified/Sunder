@@ -7,7 +7,6 @@ pub enum PlaybackState {
     Loading,
     Buffering,
     Playing,
-    Pausing,
     Paused,
     Stopped,
     Error(String),
@@ -20,7 +19,6 @@ impl std::fmt::Display for PlaybackState {
             Self::Loading => write!(f, "loading"),
             Self::Buffering => write!(f, "buffering"),
             Self::Playing => write!(f, "playing"),
-            Self::Pausing => write!(f, "paused"), // Map to "paused" for frontend
             Self::Paused => write!(f, "paused"),
             Self::Stopped => write!(f, "stopped"),
             Self::Error(msg) => write!(f, "error: {msg}"),

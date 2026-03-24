@@ -8,7 +8,6 @@ use std::time::Duration;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
 use tauri::{Emitter, Manager};
-use tokio;
 
 /// Wrapper to send a raw HWND pointer across threads.
 /// SAFETY: The HWND outlives the audio thread (it's the main window).
@@ -152,8 +151,7 @@ fn audio_thread(
     };
     eprintln!("[sunder] audio thread started, output device ready");
     let mut active_id: Option<String> = None;
-    let mut sink: Option<Arc<Sink>> = None;
-    let mut current_fade: Option<tauri::async_runtime::JoinHandle<()>> = None;
+    let mut sink: Option<Sink> = None;
 
     let mut controls = match MediaControls::new(PlatformConfig {
         dbus_name: "sunder",
@@ -205,12 +203,25 @@ fn audio_thread(
     let mut last_emit_state: Option<PlaybackState> = None;
     let mut last_emit_pos: u64 = 0;
     let mut last_emit_vol: f32 = 0.0;
-    
-    // Counter to track the current active fade and reject stale tasks
-    let current_fade_token = Arc::new(AtomicUsize::new(0));
+    // Fade structures for inline processing
+    enum FadeAction {
+        Pause,
+        SetVolume,
+    }
+
+    struct ActiveFade {
+        start_vol: f32,
+        target_vol: f32,
+        steps_total: u32,
+        steps_taken: u32,
+        action: FadeAction,
+    }
+
+    let mut active_fade: Option<ActiveFade> = None;
 
     loop {
-        let first = rx.recv_timeout(Duration::from_millis(10));
+        let timeout = if active_fade.is_some() { 10 } else { 50 };
+        let first = rx.recv_timeout(Duration::from_millis(timeout));
 
         let mut cmds: Vec<AudioCommand> = Vec::new();
         match first {
@@ -227,21 +238,14 @@ fn audio_thread(
         for cmd in cmds {
             match cmd {
                 AudioCommand::Play { video_id, duration_ms: dur } => {
+                    active_fade = None;
                     if let Some(s) = sink.take() {
-                        let _fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
-                        if let Some(f) = current_fade.take() {
-                            f.abort();
+                        let start_vol = s.volume();
+                        for i in (0..10).rev() {
+                            s.set_volume(start_vol * (i as f32 / 10.0));
+                            std::thread::sleep(Duration::from_millis(10));
                         }
-                        let s_clone = s.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let start_vol = s_clone.volume();
-                            let steps = 5;
-                            for i in (0..steps).rev() {
-                                s_clone.set_volume(start_vol * (i as f32 / steps as f32));
-                                tokio::time::sleep(Duration::from_millis(15)).await;
-                            }
-                            s_clone.stop();
-                        });
+                        s.stop();
                     }
                     let session_id = current_session.fetch_add(1, Ordering::SeqCst) + 1;
                     *state.write().unwrap() = PlaybackState::Loading;
@@ -292,40 +296,28 @@ fn audio_thread(
                 }
                 AudioCommand::Prepared {
                     session_id,
-                    sink: new_sink_raw,
+                    sink: new_sink,
                     duration_ms: dur,
                 } => {
                     if session_id == current_session.load(Ordering::SeqCst) {
                         if let Some(s) = sink.take() {
                             s.stop();
                         }
-                        let fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
-                        if let Some(f) = current_fade.take() {
-                            f.abort();
-                        }
 
-                        let new_sink = Arc::new(new_sink_raw);
                         new_sink.set_volume(0.0);
 
                         duration_ms.store(dur, Ordering::Release);
                         position_ms.store(0, Ordering::Release);
-                        sink = Some(new_sink.clone());
+                        sink = Some(new_sink);
                         *state.write().unwrap() = PlaybackState::Playing;
 
-                        let volume_handle = volume.clone();
-                        let token_handle = current_fade_token.clone();
-                        current_fade = Some(tauri::async_runtime::spawn(async move {
-                            let steps = 10;
-                            for i in 1..=steps {
-                                // Interruption check
-                                if token_handle.load(Ordering::SeqCst) != fade_token {
-                                    return;
-                                }
-                                let vol_target = *volume_handle.read().unwrap();
-                                new_sink.set_volume(vol_target * (i as f32 / steps as f32));
-                                tokio::time::sleep(Duration::from_millis(10)).await;
-                            }
-                        }));
+                        active_fade = Some(ActiveFade {
+                            start_vol: 0.0,
+                            target_vol: *volume.read().unwrap(),
+                            steps_total: 10,
+                            steps_taken: 0,
+                            action: FadeAction::SetVolume,
+                        });
 
                         emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                     }
@@ -349,84 +341,46 @@ fn audio_thread(
                     }
                 }
                 AudioCommand::Pause => {
-                    if let Some(s) = sink.clone() {
-                        let fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
-                        if let Some(f) = current_fade.take() {
-                            f.abort();
-                        }
-                        // Transition to Pausing immediately for UI responsiveness
-                        *state.write().unwrap() = PlaybackState::Pausing;
+                    if let Some(ref s) = sink {
+                        // Change state immediately for frontend responsiveness!
+                        *state.write().unwrap() = PlaybackState::Paused;
                         emit_state(&app, &state, &position_ms, &duration_ms, &volume);
 
-                        let state_clone = state.clone();
-                        let token_handle = current_fade_token.clone();
-                        current_fade = Some(tauri::async_runtime::spawn(async move {
-                            let start_vol = s.volume();
-                            let steps = 10;
-                            for i in (0..steps).rev() {
-                                // Interruption check
-                                if token_handle.load(Ordering::SeqCst) != fade_token {
-                                    return;
-                                }
-                                s.set_volume(start_vol * (i as f32 / steps as f32));
-                                tokio::time::sleep(Duration::from_millis(10)).await;
-                            }
-                            // Final check before state update and audio terminal action
-                            if token_handle.load(Ordering::SeqCst) == fade_token {
-                                s.pause();
-                                *state_clone.write().unwrap() = PlaybackState::Paused;
-                                // Periodic state emission is handled by the loop, 
-                                // but we could emit here for extreme snappiness if needed.
-                            }
-                        }));
+                        active_fade = Some(ActiveFade {
+                            start_vol: s.volume(),
+                            target_vol: 0.0,
+                            steps_total: 10,
+                            steps_taken: 0,
+                            action: FadeAction::Pause,
+                        });
                     }
                 }
                 AudioCommand::Resume => {
-                    if let Some(s) = sink.clone() {
-                        let fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
-                        if let Some(f) = current_fade.take() {
-                            f.abort();
-                        }
+                    if let Some(ref s) = sink {
                         s.play();
                         *state.write().unwrap() = PlaybackState::Playing;
                         emit_state(&app, &state, &position_ms, &duration_ms, &volume);
 
-                        let volume_handle = volume.clone();
-                        let token_handle = current_fade_token.clone();
-                        current_fade = Some(tauri::async_runtime::spawn(async move {
-                            let start_vol = s.volume();
-                            let steps = 10;
-                            for i in 1..=steps {
-                                // Interruption check
-                                if token_handle.load(Ordering::SeqCst) != fade_token {
-                                    return;
-                                }
-                                let vol_target = *volume_handle.read().unwrap();
-                                let progress = i as f32 / steps as f32;
-                                s.set_volume(start_vol + (vol_target - start_vol) * progress);
-                                tokio::time::sleep(Duration::from_millis(10)).await;
-                            }
-                        }));
+                        active_fade = Some(ActiveFade {
+                            start_vol: s.volume(),
+                            target_vol: *volume.read().unwrap(),
+                            steps_total: 10,
+                            steps_taken: 0,
+                            action: FadeAction::SetVolume,
+                        });
                     }
                 }
                 AudioCommand::Stop => {
-                    // Invalidate current session and fades to reject pending tasks
                     current_session.fetch_add(1, Ordering::SeqCst);
-                    let _fade_token = current_fade_token.fetch_add(1, Ordering::SeqCst) + 1;
+                    active_fade = None;
 
                     if let Some(s) = sink.take() {
-                        if let Some(f) = current_fade.take() {
-                            f.abort();
+                        let start_vol = s.volume();
+                        for i in (0..10).rev() {
+                            s.set_volume(start_vol * (i as f32 / 10.0));
+                            std::thread::sleep(Duration::from_millis(10));
                         }
-                        tauri::async_runtime::spawn(async move {
-                            let start_vol = s.volume();
-                            let steps = 10;
-                            for i in (0..steps).rev() {
-                                s.set_volume(start_vol * (i as f32 / steps as f32));
-                                tokio::time::sleep(Duration::from_millis(15)).await;
-                            }
-                            s.stop();
-                        });
+                        s.stop();
                     }
                     *state.write().unwrap() = PlaybackState::Stopped;
                     active_id = None;
@@ -436,10 +390,11 @@ fn audio_thread(
                 AudioCommand::SetVolume(v) => {
                     *volume.write().unwrap() = v;
                     if let Some(ref s) = sink {
-                        // Skip direct update if paused/pausing to allow Resume to ramp from 0.0 or current
+                        // Skip direct update if paused to allow Resume to ramp from 0.0 or current
                         let st = state.read().unwrap().clone();
-                        if st != PlaybackState::Paused && st != PlaybackState::Pausing {
+                        if st != PlaybackState::Paused {
                             s.set_volume(v);
+                            active_fade = None;
                         }
                     }
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume);
@@ -479,6 +434,25 @@ fn audio_thread(
             }
         }
 
+        // Step the active fade non-blockingly
+        if let Some(ref mut f) = active_fade {
+            f.steps_taken += 1;
+            let progress = f.steps_taken as f32 / f.steps_total as f32;
+            let current_v = f.start_vol + (f.target_vol - f.start_vol) * progress;
+            if let Some(ref s) = sink {
+                s.set_volume(current_v);
+            }
+            if f.steps_taken >= f.steps_total {
+                match f.action {
+                    FadeAction::Pause => {
+                        if let Some(ref s) = sink { s.pause(); }
+                    }
+                    FadeAction::SetVolume => {}
+                }
+                active_fade = None;
+            }
+        }
+
         // Only update MPRIS when playback state or position actually changed
         if let Some(ref mut c) = controls {
             let st = state.read().unwrap().clone();
@@ -498,7 +472,7 @@ fn audio_thread(
                     PlaybackState::Playing => {
                         let _ = c.set_playback(MediaPlayback::Playing { progress });
                     }
-                    PlaybackState::Paused | PlaybackState::Pausing => {
+                    PlaybackState::Paused => {
                         let _ = c.set_playback(MediaPlayback::Paused { progress });
                     }
                     PlaybackState::Stopped | PlaybackState::Idle => {
@@ -525,14 +499,14 @@ fn audio_thread(
                 // (guards against decoders that don't EOF cleanly)
                 if dur > 0
                     && pos_ms > dur + 2000
-                    && matches!(*state.read().unwrap(), PlaybackState::Playing | PlaybackState::Pausing)
+                    && *state.read().unwrap() == PlaybackState::Playing
                 {
                     eprintln!(
                         "[sunder] position ({pos_ms}ms) exceeded duration ({dur}ms), forcing track end"
                     );
                     track_ended = true;
                 }
-            } else if matches!(*state.read().unwrap(), PlaybackState::Playing | PlaybackState::Pausing) {
+            } else if *state.read().unwrap() == PlaybackState::Playing {
                 eprintln!("[sunder] track finished");
                 track_ended = true;
             }
@@ -542,9 +516,7 @@ fn audio_thread(
             if let Some(s) = sink.take() {
                 s.stop();
             }
-            if let Some(f) = current_fade.take() {
-                f.abort();
-            }
+            active_fade = None;
             *state.write().unwrap() = PlaybackState::Idle;
             active_id = None;
             position_ms.store(0, Ordering::Release);
