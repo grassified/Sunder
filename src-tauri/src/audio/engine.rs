@@ -17,6 +17,9 @@ unsafe impl Send for RawHwnd {}
 use super::equalizer::{EqSettings, EqSource};
 use super::state::PlaybackState;
 
+const FADE_STEPS: u32 = 10;
+const FADE_STEP_MS: u64 = 10;
+
 pub enum AudioCommand {
     Play {
         video_id: String,
@@ -203,9 +206,25 @@ fn audio_thread(
     let mut last_emit_state: Option<PlaybackState> = None;
     let mut last_emit_pos: u64 = 0;
     let mut last_emit_vol: f32 = 0.0;
+    // Fade structures for inline processing
+    enum FadeAction {
+        Pause,
+        SetVolume,
+    }
+
+    struct ActiveFade {
+        start_vol: f32,
+        target_vol: f32,
+        steps_total: u32,
+        steps_taken: u32,
+        action: FadeAction,
+    }
+
+    let mut active_fade: Option<ActiveFade> = None;
 
     loop {
-        let first = rx.recv_timeout(Duration::from_millis(50));
+        let timeout = if active_fade.is_some() { FADE_STEP_MS } else { 50 };
+        let first = rx.recv_timeout(Duration::from_millis(timeout));
 
         let mut cmds: Vec<AudioCommand> = Vec::new();
         match first {
@@ -222,8 +241,13 @@ fn audio_thread(
         for cmd in cmds {
             match cmd {
                 AudioCommand::Play { video_id, duration_ms: dur } => {
-                    // Stop the old sink immediately to free decoded audio memory
+                    active_fade = None;
                     if let Some(s) = sink.take() {
+                        let start_vol = s.volume();
+                        for i in (0..FADE_STEPS).rev() {
+                            s.set_volume(start_vol * (i as f32 / FADE_STEPS as f32));
+                            std::thread::sleep(Duration::from_millis(FADE_STEP_MS));
+                        }
                         s.stop();
                     }
                     let session_id = current_session.fetch_add(1, Ordering::SeqCst) + 1;
@@ -236,7 +260,6 @@ fn audio_thread(
                     let app_clone = app.clone();
                     let state_clone = state.clone();
                     let stream_handle_clone = stream_handle.clone();
-                    let volume_clone = volume.clone();
                     let eq_settings_clone = eq_settings.clone();
                     let tx_clone = tx.clone();
                     let video_id_clone = video_id.clone();
@@ -247,12 +270,10 @@ fn audio_thread(
                         if session_clone.load(Ordering::SeqCst) != session_id {
                             return;
                         }
-                        let vol = *volume_clone.read().unwrap();
                         match start_streaming(
                             &video_id_clone,
                             &state_clone,
                             &stream_handle_clone,
-                            vol,
                             &eq_settings_clone,
                             &app_clone,
                         ) {
@@ -282,10 +303,22 @@ fn audio_thread(
                         if let Some(s) = sink.take() {
                             s.stop();
                         }
+
+                        new_sink.set_volume(0.0);
+
                         duration_ms.store(dur, Ordering::Release);
                         position_ms.store(0, Ordering::Release);
                         sink = Some(new_sink);
                         *state.write().unwrap() = PlaybackState::Playing;
+
+                        active_fade = Some(ActiveFade {
+                            start_vol: 0.0,
+                            target_vol: *volume.read().unwrap(),
+                            steps_total: FADE_STEPS,
+                            steps_taken: 0,
+                            action: FadeAction::SetVolume,
+                        });
+
                         emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                     }
                 }
@@ -309,28 +342,59 @@ fn audio_thread(
                 }
                 AudioCommand::Pause => {
                     if let Some(ref s) = sink {
-                        s.pause();
-                        *state.write().unwrap() = PlaybackState::Paused;
+                        active_fade = Some(ActiveFade {
+                            start_vol: s.volume(),
+                            target_vol: 0.0,
+                            steps_total: FADE_STEPS,
+                            steps_taken: 0,
+                            action: FadeAction::Pause,
+                        });
                     }
                 }
                 AudioCommand::Resume => {
                     if let Some(ref s) = sink {
                         s.play();
                         *state.write().unwrap() = PlaybackState::Playing;
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+
+                        active_fade = Some(ActiveFade {
+                            start_vol: s.volume(),
+                            target_vol: *volume.read().unwrap(),
+                            steps_total: FADE_STEPS,
+                            steps_taken: 0,
+                            action: FadeAction::SetVolume,
+                        });
                     }
                 }
                 AudioCommand::Stop => {
+                    current_session.fetch_add(1, Ordering::SeqCst);
+                    active_fade = None;
+
                     if let Some(s) = sink.take() {
+                        let start_vol = s.volume();
+                        for i in (0..FADE_STEPS).rev() {
+                            s.set_volume(start_vol * (i as f32 / FADE_STEPS as f32));
+                            std::thread::sleep(Duration::from_millis(FADE_STEP_MS));
+                        }
                         s.stop();
                     }
                     *state.write().unwrap() = PlaybackState::Stopped;
                     active_id = None;
                     position_ms.store(0, Ordering::Release);
+                    emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                 }
                 AudioCommand::SetVolume(v) => {
                     *volume.write().unwrap() = v;
                     if let Some(ref s) = sink {
-                        s.set_volume(v);
+                        // Skip direct update if paused to allow Resume to ramp from 0.0 or current
+                        let st = state.read().unwrap().clone();
+                        if st != PlaybackState::Paused {
+                            if let Some(ref mut f) = active_fade {
+                                f.target_vol = v;
+                            } else {
+                                s.set_volume(v);
+                            }
+                        }
                     }
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                 }
@@ -366,6 +430,29 @@ fn audio_thread(
                 AudioCommand::SetRepeat(_mode) => {
                     // Stored for future MPRIS LoopStatus integration
                 }
+            }
+        }
+
+        // Step the active fade non-blockingly
+        if let Some(ref mut f) = active_fade {
+            f.steps_taken += 1;
+            let progress = f.steps_taken as f32 / f.steps_total as f32;
+            let current_v = f.start_vol + (f.target_vol - f.start_vol) * progress;
+            if let Some(ref s) = sink {
+                s.set_volume(current_v);
+            }
+            if f.steps_taken >= f.steps_total {
+                match f.action {
+                    FadeAction::Pause => {
+                        if let Some(ref s) = sink {
+                            s.pause();
+                        }
+                        *state.write().unwrap() = PlaybackState::Paused;
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                    }
+                    FadeAction::SetVolume => {}
+                }
+                active_fade = None;
             }
         }
 
@@ -432,6 +519,7 @@ fn audio_thread(
             if let Some(s) = sink.take() {
                 s.stop();
             }
+            active_fade = None;
             *state.write().unwrap() = PlaybackState::Idle;
             active_id = None;
             position_ms.store(0, Ordering::Release);
@@ -461,7 +549,6 @@ fn start_streaming(
     video_id: &str,
     state: &Arc<RwLock<PlaybackState>>,
     stream_handle: &rodio::OutputStreamHandle,
-    volume: f32,
     eq_settings: &Arc<RwLock<EqSettings>>,
     app: &tauri::AppHandle,
 ) -> Result<Sink, crate::error::AppError> {
@@ -628,14 +715,13 @@ fn start_streaming(
         expected_path.display()
     );
 
-    let file = std::fs::File::open(&expected_path)
-        .map_err(crate::error::AppError::Io)?;
+    let file = std::fs::File::open(&expected_path).map_err(crate::error::AppError::Io)?;
     let decoder = Decoder::new(io::BufReader::with_capacity(64 * 1024, file)) // this is to improve RAM usage. 64KB is enough.
         .map_err(|e| crate::error::AppError::Audio(format!("decoder init failed: {e}")))?;
 
     let sink =
         Sink::try_new(stream_handle).map_err(|e| crate::error::AppError::Audio(e.to_string()))?;
-    sink.set_volume(volume);
+    sink.set_volume(0.0);
     sink.append(EqSource::new(
         decoder.convert_samples(),
         eq_settings.clone(),
