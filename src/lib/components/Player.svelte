@@ -7,6 +7,7 @@
   import Equalizer from "./Equalizer.svelte";
   import SleepTimer from "./SleepTimer.svelte";
   import { lyricsState } from "../state/lyrics.svelte";
+  import { nav } from "../state/nav.svelte";
 
   let showMoreMenu = $state(false);
   let moreMenuRef = $state<HTMLElement | null>(null);
@@ -185,6 +186,17 @@
       </div>
 
       <div class="right-section">
+        <button
+          class="ctrl-btn ctrl-sm"
+          class:active-toggle={nav.focusMode}
+          onclick={() => nav.toggleFocus()}
+          aria-label="Focus View"
+          title="Focus View (V)"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+        </button>
         <button
           class="ctrl-btn ctrl-sm"
           class:active-toggle={player.repeatMode !== "off"}

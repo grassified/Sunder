@@ -4,6 +4,11 @@ class NavState {
   activeTab = $state<Tab>("search");
   activePlaylistId = $state<number | null>(null);
   activePlaylistName = $state("");
+  focusMode = $state(false);
+
+  toggleFocus() {
+    this.focusMode = !this.focusMode;
+  }
 }
 
 export const nav = new NavState();

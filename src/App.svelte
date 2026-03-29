@@ -9,6 +9,7 @@
   import Player from "./lib/components/Player.svelte";
   import Toast from "./lib/components/Toast.svelte";
   import LyricsView from "./lib/components/LyricsView.svelte";
+  import FocusView from "./lib/components/FocusView.svelte";
   import { 
     initProgressListener,
     pause,
@@ -88,30 +89,39 @@
           document.querySelector<HTMLInputElement>(".search-bar input")?.focus();
         }, 50);
         break;
+      case "v":
+        e.preventDefault();
+        nav.toggleFocus();
+        break;
     }
   }
 </script>
 
 <main class="app-shell">
-  <Sidebar />
+  {#if !nav.focusMode}
+    <Sidebar />
+  {/if}
 
-  <div class="main-area">
-    <section class="content">
-      {#if nav.activeTab === "search"}
-        <div class="search-section">
-          <SearchBar />
-          <TrackList />
-        </div>
-      {:else if nav.activeTab === "explore"}
-        <Explore />
-      {:else if nav.activeTab === "queue"}
-        <QueueView />
-      {:else}
-        <PlaylistView />
-      {/if}
-    </section>
-  </div>
+  {#if !nav.focusMode}
+    <div class="main-area">
+      <section class="content">
+        {#if nav.activeTab === "search"}
+          <div class="search-section">
+            <SearchBar />
+            <TrackList />
+          </div>
+        {:else if nav.activeTab === "explore"}
+          <Explore />
+        {:else if nav.activeTab === "queue"}
+          <QueueView />
+        {:else}
+          <PlaylistView />
+        {/if}
+      </section>
+    </div>
+  {/if}
 
+  <FocusView />
   <Player />
   <Toast />
   <LyricsView />
