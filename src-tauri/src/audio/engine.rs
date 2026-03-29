@@ -47,6 +47,7 @@ pub enum AudioCommand {
         track_id: String,
     },
     SetRepeat(String),
+    SetSpeed(f32),
 }
 
 pub struct AudioHandle {
@@ -55,6 +56,7 @@ pub struct AudioHandle {
     pub position_ms: Arc<AtomicU64>,
     pub duration_ms: Arc<AtomicU64>,
     pub volume: Arc<RwLock<f32>>,
+    pub speed: Arc<RwLock<f32>>,
     pub eq_settings: Arc<RwLock<EqSettings>>,
     #[allow(dead_code)]
     pub current_session: Arc<AtomicUsize>,
@@ -67,6 +69,7 @@ impl AudioHandle {
         let position_ms = Arc::new(AtomicU64::new(0));
         let duration_ms = Arc::new(AtomicU64::new(0));
         let volume = Arc::new(RwLock::new(0.8_f32));
+        let speed = Arc::new(RwLock::new(1.0_f32));
         let eq_settings = Arc::new(RwLock::new(EqSettings::default()));
         let current_session = Arc::new(AtomicUsize::new(0));
 
@@ -76,6 +79,7 @@ impl AudioHandle {
             position_ms: position_ms.clone(),
             duration_ms: duration_ms.clone(),
             volume: volume.clone(),
+            speed: speed.clone(),
             eq_settings: eq_settings.clone(),
             current_session: current_session.clone(),
         };
@@ -96,6 +100,7 @@ impl AudioHandle {
                     position_ms,
                     duration_ms,
                     volume,
+                    speed,
                     eq_settings,
                     app_handle,
                     current_session_clone,
@@ -140,6 +145,7 @@ fn audio_thread(
     position_ms: Arc<AtomicU64>,
     duration_ms: Arc<AtomicU64>,
     volume: Arc<RwLock<f32>>,
+    speed: Arc<RwLock<f32>>,
     eq_settings: Arc<RwLock<EqSettings>>,
     app: tauri::AppHandle,
     current_session: Arc<AtomicUsize>,
@@ -256,7 +262,7 @@ fn audio_thread(
                     duration_ms.store(dur, Ordering::Release);
                     position_ms.store(0, Ordering::Release);
                     active_id = Some(video_id.clone());
-                    emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                    emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
 
                     let app_clone = app.clone();
                     let state_clone = state.clone();
@@ -309,6 +315,7 @@ fn audio_thread(
 
                         duration_ms.store(dur, Ordering::Release);
                         position_ms.store(0, Ordering::Release);
+                        new_sink.set_speed(*speed.read().unwrap());
                         sink = Some(new_sink);
                         *state.write().unwrap() = PlaybackState::Playing;
 
@@ -320,7 +327,7 @@ fn audio_thread(
                             action: FadeAction::SetVolume,
                         });
 
-                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
                     }
                 }
                 AudioCommand::LoadFailed {
@@ -331,7 +338,7 @@ fn audio_thread(
                     if session_id == current_session.load(Ordering::SeqCst) {
                         *state.write().unwrap() = PlaybackState::Idle;
                         active_id = None;
-                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
                         let _ = app.emit(
                             "playback-error",
                             serde_json::json!({
@@ -356,7 +363,7 @@ fn audio_thread(
                     if let Some(ref s) = sink {
                         s.play();
                         *state.write().unwrap() = PlaybackState::Playing;
-                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
 
                         active_fade = Some(ActiveFade {
                             start_vol: s.volume(),
@@ -382,7 +389,7 @@ fn audio_thread(
                     *state.write().unwrap() = PlaybackState::Stopped;
                     active_id = None;
                     position_ms.store(0, Ordering::Release);
-                    emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                    emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
                 }
                 AudioCommand::SetVolume(v) => {
                     *volume.write().unwrap() = v;
@@ -400,7 +407,7 @@ fn audio_thread(
                     if let Some(ref mut c) = controls {
                         let _ = c.set_volume(v as f64);
                     }
-                    emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                    emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
                 }
                 AudioCommand::Seek(secs) => {
                     if let Some(ref s) = sink {
@@ -434,6 +441,14 @@ fn audio_thread(
                 AudioCommand::SetRepeat(_mode) => {
                     // Stored for future MPRIS LoopStatus integration
                 }
+                AudioCommand::SetSpeed(s) => {
+                    let clamped = s.clamp(0.25, 3.0);
+                    *speed.write().unwrap() = clamped;
+                    if let Some(ref sk) = sink {
+                        sk.set_speed(clamped);
+                    }
+                    emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
+                }
             }
         }
 
@@ -452,7 +467,7 @@ fn audio_thread(
                             s.pause();
                         }
                         *state.write().unwrap() = PlaybackState::Paused;
-                        emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+                        emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
                     }
                     FadeAction::SetVolume => {}
                 }
@@ -538,7 +553,7 @@ fn audio_thread(
         let pos_changed = cur_pos.abs_diff(last_emit_pos) > 200;
         let vol_changed = (cur_vol - last_emit_vol).abs() > 0.001;
         if state_changed || pos_changed || vol_changed {
-            emit_state(&app, &state, &position_ms, &duration_ms, &volume);
+            emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
             last_emit_state = Some(cur_state);
             last_emit_pos = cur_pos;
             last_emit_vol = cur_vol;
@@ -740,6 +755,7 @@ struct ProgressPayload {
     duration_ms: u64,
     state: String,
     volume: f32,
+    speed: f32,
 }
 
 fn emit_state(
@@ -748,6 +764,7 @@ fn emit_state(
     position_ms: &Arc<AtomicU64>,
     duration_ms: &Arc<AtomicU64>,
     volume: &Arc<RwLock<f32>>,
+    speed: &Arc<RwLock<f32>>,
 ) {
     let _ = app.emit(
         "playback-progress",
@@ -756,6 +773,7 @@ fn emit_state(
             duration_ms: duration_ms.load(Ordering::Relaxed),
             state: state.read().unwrap().to_string(),
             volume: *volume.read().unwrap(),
+            speed: *speed.read().unwrap(),
         },
     );
 }

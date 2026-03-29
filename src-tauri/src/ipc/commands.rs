@@ -136,6 +136,12 @@ pub async fn set_volume(volume: f32, audio: State<'_, AudioHandle>) -> Result<()
 }
 
 #[tauri::command]
+pub async fn set_speed(speed: f32, audio: State<'_, AudioHandle>) -> Result<(), String> {
+    audio.send(AudioCommand::SetSpeed(speed.clamp(0.25, 3.0)));
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn seek(position_secs: f64, audio: State<'_, AudioHandle>) -> Result<(), String> {
     audio.send(AudioCommand::Seek(position_secs));
     Ok(())
@@ -147,12 +153,14 @@ pub async fn get_playback_state(audio: State<'_, AudioHandle>) -> Result<serde_j
     let pos = audio.position_ms.load(Ordering::Relaxed);
     let dur = audio.duration_ms.load(Ordering::Relaxed);
     let vol = *audio.volume.read().unwrap();
+    let spd = *audio.speed.read().unwrap();
 
     Ok(serde_json::json!({
         "state": state.to_string(),
         "position_ms": pos,
         "duration_ms": dur,
         "volume": vol,
+        "speed": spd,
     }))
 }
 

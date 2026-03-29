@@ -11,6 +11,7 @@ class PlayerState {
   currentTime = $state(0);
   duration = $state(0);
   volume = $state(0.8);
+  speed = $state(1.0);
   queue = $state<Track[]>([]);
   queueIndex = $state(-1);
   shuffled = $state(false);
@@ -46,6 +47,7 @@ class PlayerState {
     this.duration = p.duration_ms / 1000;
     this.playbackState = p.state;
     this.volume = p.volume;
+    this.speed = p.speed;
     this.isPlaying = p.state === "playing";
     this.isBuffering = p.state === "buffering" || p.state === "loading";
     if (this.isPlaying) {

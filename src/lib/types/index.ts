@@ -17,6 +17,7 @@ export interface PlaybackProgress {
   duration_ms: number;
   state: string;
   volume: number;
+  speed: number;
 }
 
 export interface Playlist {

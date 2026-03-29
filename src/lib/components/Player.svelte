@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pause, resume, stop, playTrack, playPrev, search } from "../ipc/bridge";
+  import { pause, resume, stop, playTrack, playPrev, search, setSpeed } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { config } from "../state/config.svelte";
   import ProgressBar from "./ProgressBar.svelte";
@@ -277,6 +277,38 @@
                 <span>Notifications</span>
                 <span class="more-badge">{config.current.notifications_enabled ? "ON" : "OFF"}</span>
               </button>
+              <div class="more-menu-divider"></div>
+              <div class="speed-control">
+                <div class="speed-header">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
+                  <span>Speed</span>
+                  <button
+                    class="speed-reset"
+                    class:hidden={player.speed === 1.0}
+                    onclick={() => setSpeed(1.0)}
+                  >
+                    Reset
+                  </button>
+                  <span class="more-badge">{player.speed.toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.25"
+                  max="3"
+                  step="0.05"
+                  value={player.speed}
+                  oninput={(e) => setSpeed(parseFloat((e.target as HTMLInputElement).value))}
+                  class="speed-slider"
+                  aria-label="Playback speed"
+                />
+                <div class="speed-marks">
+                  <span>0.25x</span>
+                  <span>1x</span>
+                  <span>3x</span>
+                </div>
+              </div>
               <div class="more-menu-divider"></div>
               <div class="more-menu-sleep">
                 <SleepTimer />
@@ -638,6 +670,78 @@
     height: 1px;
     background: var(--bg-overlay);
     margin: 4px 6px;
+  }
+
+  .speed-control {
+    padding: 6px 10px;
+  }
+
+  .speed-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+
+  .speed-header svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+  }
+
+  .speed-reset {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--border-primary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .speed-reset:hover {
+    background: var(--bg-overlay);
+    color: var(--text-primary);
+  }
+
+  .speed-reset.hidden {
+    display: none;
+  }
+
+  .speed-slider {
+    width: 100%;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-overlay);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+  }
+
+  .speed-marks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    opacity: 0.6;
   }
 
   .more-menu-sleep {

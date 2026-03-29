@@ -84,6 +84,11 @@ export async function setVolume(volume: number): Promise<void> {
   await invoke("set_volume", { volume });
 }
 
+export async function setSpeed(speed: number): Promise<void> {
+  player.speed = speed;
+  await invoke("set_speed", { speed });
+}
+
 export async function seek(positionSecs: number): Promise<void> {
   await invoke("seek", { positionSecs });
 }
