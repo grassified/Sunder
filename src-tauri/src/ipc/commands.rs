@@ -331,27 +331,8 @@ pub async fn get_explore(
     let mut sections: Vec<serde_json::Value> = Vec::new();
     let mut seen_ids: HashSet<String> = HashSet::new();
 
-    macro_rules! fetch_section {
-        ($title:expr, $query:expr, $limit:expr) => {{
-            let tracks = match extractor.search($query, $limit).await {
-                Ok(t) => t,
-                Err(_) => extractor.search_youtube($query, $limit).await.unwrap_or_default(),
-            };
-            if !tracks.is_empty() {
-                let _ = db.upsert_tracks(&tracks);
-                let filtered: Vec<Track> = tracks
-                    .into_iter()
-                    .filter(|t| seen_ids.insert(t.id.clone()))
-                    .collect();
-                if !filtered.is_empty() {
-                    sections.push(serde_json::json!({
-                        "title": $title,
-                        "tracks": filtered,
-                    }));
-                }
-            }
-        }};
-    }
+    // Collect all (title, query, limit) to search concurrently
+    let mut queries: Vec<(String, String, usize)> = Vec::new();
 
     if listen_count < 5 {
         let starters = [
@@ -368,83 +349,105 @@ pub async fn get_explore(
         let count = 5.min(starters.len());
         for i in 0..count {
             let (title, query) = starters[(offset + i) % starters.len()];
-            fetch_section!(title, query, 8);
+            queries.push((title.to_string(), query.to_string(), 8));
         }
-        return Ok(serde_json::json!({ "sections": sections }));
+    } else {
+        let recent = db.recently_played(10).unwrap_or_default();
+        let top_artists = db.top_artists(8).unwrap_or_default();
+        let keywords = db.title_keywords(15).unwrap_or_default();
+        let recent_ids = db.recent_track_ids(7).unwrap_or_default();
+        seen_ids.extend(recent_ids);
+
+        if !recent.is_empty() {
+            sections.push(serde_json::json!({ "title": "Recently Played", "tracks": recent }));
+        }
+
+        for artist in top_artists.iter().take(3) {
+            let strategies = [
+                format!("{artist} similar artists music"),
+                format!("{artist} fans also like"),
+                format!("{artist} type music"),
+            ];
+            let pick = simple_hash(artist) % strategies.len();
+            queries.push((
+                format!("Because you listen to {artist}"),
+                strategies[pick].clone(),
+                8,
+            ));
+        }
+
+        let mood_keywords: Vec<&str> = keywords
+            .iter()
+            .filter(|(w, count)| {
+                *count >= 2
+                    && !top_artists
+                        .iter()
+                        .any(|a| a.to_lowercase().contains(w.as_str()))
+            })
+            .take(6)
+            .map(|(w, _)| w.as_str())
+            .collect();
+
+        if mood_keywords.len() >= 2 {
+            for chunk in mood_keywords.chunks(2).take(2) {
+                let query = format!("{} music", chunk.join(" "));
+                let title = format!(
+                    "More {}",
+                    chunk.iter().map(|w| capitalize(w)).collect::<Vec<_>>().join(" & ")
+                );
+                queries.push((title, query, 8));
+            }
+        }
+
+        if top_artists.len() >= 4 {
+            let a1 = &top_artists[0];
+            let a2 = &top_artists[top_artists.len() / 2];
+            queries.push(("Discovery Mix".to_string(), format!("{a1} {a2} mix playlist"), 8));
+        }
+
+        if top_artists.len() >= 5 {
+            let deep = &top_artists[top_artists.len() - 1];
+            queries.push((format!("Dig Deeper: {deep}"), format!("{deep} best songs"), 6));
+        }
+
+        if !keywords.is_empty() {
+            let idx = simple_hash(top_artists.first().map(|s| s.as_str()).unwrap_or(""))
+                % keywords.len();
+            let word = &keywords[idx].0;
+            if !mood_keywords.contains(&word.as_str()) {
+                queries.push((
+                    format!("You Might Like: {}", capitalize(word)),
+                    format!("{word} songs playlist"),
+                    8,
+                ));
+            }
+        }
     }
 
-    let recent = db.recently_played(10).unwrap_or_default();
-    let top_artists = db.top_artists(8).unwrap_or_default();
-    let keywords = db.title_keywords(15).unwrap_or_default();
-    let recent_ids = db.recent_track_ids(7).unwrap_or_default();
-    seen_ids.extend(recent_ids);
-
-    // 1) Recently Played
-    if !recent.is_empty() {
-        sections.push(serde_json::json!({ "title": "Recently Played", "tracks": recent }));
-    }
-
-    // 2) "Because you listen to {artist}"
-    for artist in top_artists.iter().take(3) {
-        let strategies = [
-            format!("{artist} similar artists music"),
-            format!("{artist} fans also like"),
-            format!("{artist} type music"),
-        ];
-        let pick = simple_hash(artist) % strategies.len();
-        let title = format!("Because you listen to {artist}");
-        fetch_section!(&title, &strategies[pick], 8);
-    }
-
-    // 3) surface genre signals from listening patterns
-    let mood_keywords: Vec<&str> = keywords
-        .iter()
-        .filter(|(w, count)| {
-            *count >= 2
-                && !top_artists
-                    .iter()
-                    .any(|a| a.to_lowercase().contains(w.as_str()))
+    // Run all searches concurrently
+    let results: Vec<Vec<Track>> = futures::future::join_all(
+        queries.iter().map(|(_, query, limit)| async {
+            match extractor.search(query, *limit).await {
+                Ok(t) => t,
+                Err(_) => extractor.search_youtube(query, *limit).await.unwrap_or_default(),
+            }
         })
-        .take(6)
-        .map(|(w, _)| w.as_str())
-        .collect();
+    ).await;
 
-    if mood_keywords.len() >= 2 {
-        for chunk in mood_keywords.chunks(2).take(2) {
-            let query = format!("{} music", chunk.join(" "));
-            let title = format!(
-                "More {}",
-                chunk.iter().map(|w| capitalize(w)).collect::<Vec<_>>().join(" & ")
-            );
-            fetch_section!(&title, &query, 8);
-        }
-    }
-
-    // 4) combine two different artists for discovery
-    if top_artists.len() >= 4 {
-        let a1 = &top_artists[0];
-        let a2 = &top_artists[top_artists.len() / 2];
-        let query = format!("{a1} {a2} mix playlist");
-        fetch_section!("Discovery Mix", &query, 8);
-    }
-
-    // 5) lesser-played artist gets a spotlight
-    if top_artists.len() >= 5 {
-        let deep = &top_artists[top_artists.len() - 1];
-        let query = format!("{deep} best songs");
-        let title = format!("Dig Deeper: {deep}");
-        fetch_section!(&title, &query, 6);
-    }
-
-    // 6) use a keyword the user gravitates toward
-    if !keywords.is_empty() {
-        let idx = simple_hash(top_artists.first().map(|s| s.as_str()).unwrap_or(""))
-            % keywords.len();
-        let word = &keywords[idx].0;
-        if !mood_keywords.contains(&word.as_str()) {
-            let query = format!("{word} songs playlist");
-            let title = format!("You Might Like: {}", capitalize(word));
-            fetch_section!(&title, &query, 8);
+    // Process results in order, deduplicating and building sections
+    for ((title, _, _), tracks) in queries.into_iter().zip(results) {
+        if !tracks.is_empty() {
+            let _ = db.upsert_tracks(&tracks);
+            let filtered: Vec<Track> = tracks
+                .into_iter()
+                .filter(|t| seen_ids.insert(t.id.clone()))
+                .collect();
+            if !filtered.is_empty() {
+                sections.push(serde_json::json!({
+                    "title": title,
+                    "tracks": filtered,
+                }));
+            }
         }
     }
 

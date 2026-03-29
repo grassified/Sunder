@@ -192,11 +192,11 @@ export function initProgressListener(): () => void {
   }).then((fn) => { unlistenError = fn; });
 
   listen("media-next", () => {
-    playNext().catch((e) => console.error("Media key next failed:", e));
+    playNext(true).catch((e) => console.error("Media key next failed:", e));
   }).then((fn) => { unlistenNext = fn; });
 
   listen("media-previous", () => {
-    playPrev().catch((e) => console.error("Media key previous failed:", e));
+    playPrev(true).catch((e) => console.error("Media key previous failed:", e));
   }).then((fn) => { unlistenPrev = fn; });
 
   listen("media-toggle", () => {

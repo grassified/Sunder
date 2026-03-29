@@ -196,6 +196,7 @@ fn audio_thread(
                     _ => {}
                 }
             });
+            let _ = c.set_volume(*volume.read().unwrap() as f64);
             Some(c)
         }
         Err(_) => None,
@@ -395,6 +396,9 @@ fn audio_thread(
                                 s.set_volume(v);
                             }
                         }
+                    }
+                    if let Some(ref mut c) = controls {
+                        let _ = c.set_volume(v as f64);
                     }
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume);
                 }
