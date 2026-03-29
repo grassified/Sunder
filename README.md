@@ -26,6 +26,7 @@ The name says it all: to *sunder* means to split apart. We split the music from 
 ### Playback
 - **Dual-source search** queries YouTube Music and regular YouTube simultaneously, ranked and deduplicated
 - **Native audio** via rodio, talking directly to ALSA/PipeWire/Pulse with no Web Audio overhead
+- **Playback speed control** adjustable from 0.25x to 3x via a slider in the controls popup
 - **Smart error recovery** if a track fails (geo-blocked, age-gated, unavailable), a banner appears offering to find an alternative version automatically, with auto-skip fallback if ignored
 - **Retry with bypass** yt-dlp failures trigger a silent retry with `--force-ipv4` and `--geo-bypass` before giving up
 - **Non-blocking prefetch** audio is prepared in a background thread with early session checks to discard stale loads; upcoming tracks are pre-downloaded for seamless transitions
@@ -43,6 +44,7 @@ The name says it all: to *sunder* means to split apart. We split the music from 
 ### Playlists
 - **Full CRUD** with inline rename, quick-play, and drag-to-reorder
 - **YouTube Music playlist import** paste a YT Music playlist URL to import it by name in one step
+- **JSON export/import** export any playlist to a JSON file and re-import it on another machine or as a backup
 - **Remove from context menu** right-click any track to remove it from the current playlist
 
 ### System Integration
@@ -56,6 +58,8 @@ The name says it all: to *sunder* means to split apart. We split the music from 
 - **Audio equalizer** 10-band parametric EQ with per-band gain control
 
 ### App
+- **Focus View** full-screen mode with blurred album art background, toggled with `V` or the focus button
+- **Playback Controls popup** consolidates EQ, notifications, speed, and sleep timer into a single dropdown
 - **Explore** with personalized recommendations built from your listening history
 - **Warm animated UI** with spring physics, staggered entrances, glow pulses, and micro-interactions
 - **~15MB binary** with release optimizations (LTO, strip, single codegen unit)
@@ -200,7 +204,10 @@ Audio is cached temporarily in `/tmp/sunder/` and automatically reused on replay
 - [x] MPRIS / system media controller (Linux + Windows)
 - [x] Dual-source search (YouTube Music + YouTube)
 - [x] YouTube Music playlist import
+- [x] Playlist JSON export/import
 - [x] Persistent settings (volume, EQ)
+- [x] Playback speed control
+- [x] Focus View mode
 - [ ] Local track downloads with library management
 
 ## Contributing
