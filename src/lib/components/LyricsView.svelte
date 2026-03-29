@@ -73,7 +73,7 @@
     border-left: 1px solid var(--bg-overlay);
     display: flex;
     flex-direction: column;
-    z-index: 100;
+    z-index: 50;
     animation: slideIn 200ms ease;
     transition: bottom 300ms var(--ease-out-expo);
   }

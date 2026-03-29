@@ -4,6 +4,10 @@
   import WormText from "./WormText.svelte";
 
   let track = $derived(player.currentTrack);
+
+  $effect(() => {
+    if (nav.focusMode && !track) nav.focusMode = false;
+  });
 </script>
 
 {#if nav.focusMode && track}

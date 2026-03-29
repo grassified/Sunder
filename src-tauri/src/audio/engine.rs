@@ -213,6 +213,13 @@ fn audio_thread(
     let mut last_emit_state: Option<PlaybackState> = None;
     let mut last_emit_pos: u64 = 0;
     let mut last_emit_vol: f32 = 0.0;
+    // Speed-corrected position tracking.
+    // rodio's get_pos() returns wall-clock time, not source position,
+    // because track_position() sits after speed() in the sink chain.
+    // We accumulate delta * speed to get the true source position.
+    let mut corrected_pos_ms: u64 = 0;
+    let mut last_raw_pos_ms: u64 = 0;
+    let mut seek_pending = false;
     // Fade structures for inline processing
     enum FadeAction {
         Pause,
@@ -261,6 +268,9 @@ fn audio_thread(
                     *state.write().unwrap() = PlaybackState::Loading;
                     duration_ms.store(dur, Ordering::Release);
                     position_ms.store(0, Ordering::Release);
+                    corrected_pos_ms = 0;
+                    last_raw_pos_ms = 0;
+                    seek_pending = false;
                     active_id = Some(video_id.clone());
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
 
@@ -315,6 +325,9 @@ fn audio_thread(
 
                         duration_ms.store(dur, Ordering::Release);
                         position_ms.store(0, Ordering::Release);
+                        corrected_pos_ms = 0;
+                        last_raw_pos_ms = 0;
+                        seek_pending = false;
                         new_sink.set_speed(*speed.read().unwrap());
                         sink = Some(new_sink);
                         *state.write().unwrap() = PlaybackState::Playing;
@@ -388,6 +401,9 @@ fn audio_thread(
                     }
                     *state.write().unwrap() = PlaybackState::Stopped;
                     active_id = None;
+                    corrected_pos_ms = 0;
+                    last_raw_pos_ms = 0;
+                    seek_pending = false;
                     position_ms.store(0, Ordering::Release);
                     emit_state(&app, &state, &position_ms, &duration_ms, &volume, &speed);
                 }
@@ -415,7 +431,9 @@ fn audio_thread(
                         if let Err(e) = s.try_seek(d) {
                             eprintln!("[sunder] seek failed: {e}");
                         } else {
-                            position_ms.store((secs * 1000.0) as u64, Ordering::Release);
+                            corrected_pos_ms = (secs * 1000.0) as u64;
+                            position_ms.store(corrected_pos_ms, Ordering::Release);
+                            seek_pending = true;
                         }
                     }
                 }
@@ -512,19 +530,28 @@ fn audio_thread(
 
         if let Some(ref s) = sink {
             if !s.empty() {
-                let pos = s.get_pos();
-                let pos_ms = pos.as_millis() as u64;
+                let raw_ms = s.get_pos().as_millis() as u64;
+                if seek_pending {
+                    // After a seek, resync raw baseline without applying delta
+                    last_raw_pos_ms = raw_ms;
+                    seek_pending = false;
+                } else {
+                    let delta = raw_ms.saturating_sub(last_raw_pos_ms);
+                    let spd = *speed.read().unwrap();
+                    corrected_pos_ms += (delta as f64 * spd as f64) as u64;
+                    last_raw_pos_ms = raw_ms;
+                }
                 let dur = duration_ms.load(Ordering::Relaxed);
-                position_ms.store(pos_ms, Ordering::Release);
+                position_ms.store(corrected_pos_ms, Ordering::Release);
 
                 // Force completion if position far exceeds reported duration
                 // (guards against decoders that don't EOF cleanly)
                 if dur > 0
-                    && pos_ms > dur + 2000
+                    && corrected_pos_ms > dur + 2000
                     && *state.read().unwrap() == PlaybackState::Playing
                 {
                     eprintln!(
-                        "[sunder] position ({pos_ms}ms) exceeded duration ({dur}ms), forcing track end"
+                        "[sunder] position ({corrected_pos_ms}ms) exceeded duration ({dur}ms), forcing track end"
                     );
                     track_ended = true;
                 }
@@ -541,6 +568,9 @@ fn audio_thread(
             active_fade = None;
             *state.write().unwrap() = PlaybackState::Idle;
             active_id = None;
+            corrected_pos_ms = 0;
+            last_raw_pos_ms = 0;
+            seek_pending = false;
             position_ms.store(0, Ordering::Release);
             let _ = app.emit("track-finished", ());
         }

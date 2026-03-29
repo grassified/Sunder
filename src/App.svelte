@@ -91,7 +91,7 @@
         break;
       case "v":
         e.preventDefault();
-        nav.toggleFocus();
+        nav.toggleFocus(!!player.currentTrack);
         break;
     }
   }

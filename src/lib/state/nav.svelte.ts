@@ -6,7 +6,8 @@ class NavState {
   activePlaylistName = $state("");
   focusMode = $state(false);
 
-  toggleFocus() {
+  toggleFocus(hasTrack: boolean) {
+    if (!this.focusMode && !hasTrack) return;
     this.focusMode = !this.focusMode;
   }
 }

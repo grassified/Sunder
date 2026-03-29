@@ -40,6 +40,7 @@
   function toggleMoreMenu(e: MouseEvent) {
     e.stopPropagation();
     showMoreMenu = !showMoreMenu;
+    if (showMoreMenu) lyricsState.visible = false;
   }
 
   function closeMoreMenu() {
@@ -90,53 +91,57 @@
     <ProgressBar />
 
     {#if player.downloadStage === "error" || player.downloadStage === "finding" || player.downloadStage === "no-alt"}
-      <div class="error-banner">
-        <div class="error-banner-left">
-          <svg class="dl-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          <div class="error-banner-text">
-            <span class="error-main">Track unavailable</span>
-            {#if player.downloadStage === "finding"}
-              <span class="error-sub">Searching for alternative...</span>
-            {:else if player.downloadStage === "no-alt"}
-              <span class="error-sub">No alternative found</span>
-            {:else if player.hasNext}
-              <span class="error-sub">Auto-skipping in a few seconds</span>
-            {:else}
-              <span class="error-sub">No more tracks in queue</span>
-            {/if}
+      <div class="status-overlay">
+        <div class="error-banner">
+          <div class="error-banner-left">
+            <svg class="dl-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <div class="error-banner-text">
+              <span class="error-main">Track unavailable</span>
+              {#if player.downloadStage === "finding"}
+                <span class="error-sub">Searching for alternative...</span>
+              {:else if player.downloadStage === "no-alt"}
+                <span class="error-sub">No alternative found</span>
+              {:else if player.hasNext}
+                <span class="error-sub">Auto-skipping in a few seconds</span>
+              {:else}
+                <span class="error-sub">No more tracks in queue</span>
+              {/if}
+            </div>
           </div>
-        </div>
-        <div class="error-banner-actions">
-          {#if player.downloadStage === "finding"}
-            <div class="dl-spinner"></div>
-          {:else if player.downloadStage !== "no-alt"}
-            <button class="error-btn alt-btn" onclick={findAlternative}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              Find Alternative
+          <div class="error-banner-actions">
+            {#if player.downloadStage === "finding"}
+              <div class="dl-spinner"></div>
+            {:else if player.downloadStage !== "no-alt"}
+              <button class="error-btn alt-btn" onclick={findAlternative}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Find Alternative
+              </button>
+            {/if}
+            <button class="error-btn dismiss-btn" onclick={dismissError} aria-label="Dismiss">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
-          {/if}
-          <button class="error-btn dismiss-btn" onclick={dismissError} aria-label="Dismiss">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
+          </div>
         </div>
       </div>
     {:else if player.isBuffering && player.downloadStage}
-      <div class="download-status">
-        {#if player.downloadStage === "downloading"}
-          <div class="dl-bar">
-            <div class="dl-fill" style="width: {player.downloadPercent}%"></div>
-          </div>
-          <span class="dl-text">Downloading {Math.round(player.downloadPercent)}%</span>
-        {:else if player.downloadStage === "converting"}
-          <div class="dl-spinner"></div>
-          <span class="dl-text">Converting audio...</span>
-        {:else if player.downloadStage === "extracting"}
-          <div class="dl-spinner"></div>
-          <span class="dl-text">Fetching stream info...</span>
-        {:else}
-          <div class="dl-spinner"></div>
-          <span class="dl-text">Preparing...</span>
-        {/if}
+      <div class="status-overlay">
+        <div class="download-status">
+          {#if player.downloadStage === "downloading"}
+            <div class="dl-bar">
+              <div class="dl-fill" style="width: {player.downloadPercent}%"></div>
+            </div>
+            <span class="dl-text">Downloading {Math.round(player.downloadPercent)}%</span>
+          {:else if player.downloadStage === "converting"}
+            <div class="dl-spinner"></div>
+            <span class="dl-text">Converting audio...</span>
+          {:else if player.downloadStage === "extracting"}
+            <div class="dl-spinner"></div>
+            <span class="dl-text">Fetching stream info...</span>
+          {:else}
+            <div class="dl-spinner"></div>
+            <span class="dl-text">Preparing...</span>
+          {/if}
+        </div>
       </div>
     {/if}
 
@@ -189,7 +194,7 @@
         <button
           class="ctrl-btn ctrl-sm"
           class:active-toggle={nav.focusMode}
-          onclick={() => nav.toggleFocus()}
+          onclick={() => nav.toggleFocus(!!player.currentTrack)}
           aria-label="Focus View"
           title="Focus View (V)"
         >
@@ -217,7 +222,7 @@
         <button
           class="ctrl-btn ctrl-sm"
           class:active-toggle={lyricsState.visible}
-          onclick={() => lyricsState.visible = !lyricsState.visible}
+          onclick={() => { lyricsState.visible = !lyricsState.visible; if (lyricsState.visible) showMoreMenu = false; }}
           aria-label="Lyrics"
           title="Lyrics"
         >
@@ -305,7 +310,6 @@
                 />
                 <div class="speed-marks">
                   <span>0.25x</span>
-                  <span>1x</span>
                   <span>3x</span>
                 </div>
               </div>
@@ -485,11 +489,21 @@
     white-space: nowrap;
   }
 
+  .status-overlay {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--bg-overlay);
+    z-index: 10;
+  }
+
   .download-status {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 0 24px 4px;
+    padding: 6px 24px;
   }
 
   .dl-bar {
@@ -741,6 +755,7 @@
     font-size: 10px;
     color: var(--text-secondary);
     margin-top: 2px;
+    padding: 0 7px;
     opacity: 0.6;
   }
 
