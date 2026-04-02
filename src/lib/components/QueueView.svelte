@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { playTrack } from "../ipc/bridge";
   import { player } from "../state/player.svelte";
   import { fly } from "svelte/transition";
@@ -34,16 +35,16 @@
   }
 
   // Mount: find the .content scroll parent and listen to its scroll events
-  $effect(() => {
+  onMount(() => {
     const el = document.querySelector('.content') as HTMLElement | null;
-    if (el && el !== scrollContainer) {
+    if (el) {
       scrollContainer = el;
       viewportHeight = el.clientHeight;
       scrollTop = el.scrollTop;
       el.addEventListener('scroll', onScroll, { passive: true });
     }
     return () => {
-      if (scrollContainer) scrollContainer.removeEventListener('scroll', onScroll);
+      if (el) el.removeEventListener('scroll', onScroll);
     };
   });
 

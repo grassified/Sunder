@@ -294,6 +294,8 @@ fn audio_thread(
                             &stream_handle_clone,
                             &eq_settings_clone,
                             &app_clone,
+                            &session_clone,
+                            session_id,
                         ) {
                             Ok(new_sink) => {
                                 let _ = tx_clone.send(AudioCommand::Prepared {
@@ -593,6 +595,29 @@ fn audio_thread(
     }
 }
 
+/// Prune the cache directory to at most `keep` MP3 files (by modification time).
+fn cleanup_cache(cache_dir: &std::path::Path, keep: usize) {
+    let mut entries: Vec<_> = std::fs::read_dir(cache_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "mp3").unwrap_or(false))
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            Some((e.path(), modified))
+        })
+        .collect();
+
+    if entries.len() <= keep {
+        return;
+    }
+
+    entries.sort_by(|a, b| b.1.cmp(&a.1)); // newest first
+    for (path, _) in entries.iter().skip(keep) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Download audio via yt-dlp to a temp MP3 file, then decode with rodio.
 /// symphonia 0.5 cannot decode YouTube's M4A containers (SeekError on init),
 /// so we let yt-dlp + ffmpeg convert to MP3 which symphonia handles perfectly.
@@ -602,12 +627,15 @@ fn start_streaming(
     stream_handle: &rodio::OutputStreamHandle,
     eq_settings: &Arc<RwLock<EqSettings>>,
     app: &tauri::AppHandle,
+    current_session: &Arc<AtomicUsize>,
+    session_id: usize,
 ) -> Result<Sink, crate::error::AppError> {
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let bin = ytdlp_bin();
 
     let cache_dir = std::env::temp_dir().join("sunder");
     std::fs::create_dir_all(&cache_dir).map_err(crate::error::AppError::Io)?;
+    cleanup_cache(&cache_dir, 50);
 
     let out_template = cache_dir.join(format!("{video_id}.%(ext)s"));
     let expected_path = cache_dir.join(format!("{video_id}.mp3"));
@@ -755,6 +783,11 @@ fn start_streaming(
         }
     } else {
         eprintln!("[sunder] cache hit: {}", expected_path.display());
+    }
+
+    // Abort early if the user skipped to another track during download
+    if current_session.load(Ordering::SeqCst) != session_id {
+        return Err(crate::error::AppError::Audio("session superseded".into()));
     }
 
     let file_len = std::fs::metadata(&expected_path)
